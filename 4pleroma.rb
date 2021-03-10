@@ -11,6 +11,7 @@ class FourPleroma
     @instance = info['instance']
     @old_threads = []
     @skip_first = true
+    @info["badwords"].collect! { |badword| badword.downcase }
   end
 
   def start
@@ -43,11 +44,17 @@ class FourPleroma
         thread_url = info['thread_url'].gsub("%%NUMBER%%", thread_no.to_s)
         puts "EXAMINING THREAD: #{thread_url}"
         posts = JSON.parse(Net::HTTP.get(URI(thread_url)))["posts"]
-        if posts.any? { |post| info["badwords"].any? { |bw| post["com"].to_s.downcase.include?(bw.downcase) or post["sub"].to_s.downcase.include?(bw.downcase) } }
-          puts "\tSkipping thread for detected badword: #{posts.collect { |post| info["badwords"].select { |bw| post["com"].to_s.downcase.include?(bw.downcase) or post["sub"].to_s.downcase.include?(bw.downcase) } }.flatten.uniq.to_s }"
-          info["threads_touched"][thread_no] = timestamp.to_i
+
+        thread_words = posts.collect { |post| post_words(post) }.flatten.uniq
+        thread_badwords = thread_words & info["badwords"]
+
+        if thread_badwords.length > 0
+          puts "\tSkipping thread for detected bad words: #{thread_badwords.to_s}"
           next
+        else
+          puts "\tNo bad words found, but did find these acceptable words: #{thread_words.to_s}"
         end
+
         posts.select! { |x| x["time"] >= info["threads_touched"][thread_no].to_i and x["tim"] }
         posts.each do |post|
           post_image(info['image_url'].gsub("%%TIM%%", post["tim"].to_s).gsub("%%EXT%%", post["ext"]), post)
@@ -65,6 +72,15 @@ class FourPleroma
       @skip_first = false
       sleep 60
     end
+  end
+
+  def post_words(post)
+    wds = words(post["com"]) + words(post["filename"]) + words(post["sub"])
+    wds.uniq
+  end
+
+  def words(text)
+    text.to_s.downcase.scan(/[\w']+/)
   end
 
   def post_image(url, post)
