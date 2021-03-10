@@ -41,7 +41,7 @@ class FourPleroma
 
       threads.each do |thread|
         thread_no = thread["no"].to_s
-        next if info["threads_touched"].keys.include?(thread_no) and info["threads_touched"][thread_no] >= (thread["last_modified"]-600)
+        next if info["threads_touched"].keys.include?(thread_no) and info["threads_touched"][thread_no] >= (info['janny_lag'])
         thread_url = info['thread_url'].gsub("%%NUMBER%%", thread_no.to_s)
         puts "EXAMINING THREAD: #{thread_url}"
         begin
