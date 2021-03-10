@@ -66,8 +66,11 @@ class FourPleroma
         info["threads_touched"][thread_no] = timestamp.to_i
       end
 
+      new_info = info
+      new_info["threads_touched"].select { |k,v| v == Float::INFINITY }.keys.each { |k| new_info["threads_touched"][k] = Time.now.to_i * 2 }
+
       f = File.open(filename, "w")
-      f.write(JSON.pretty_generate(info))
+      f.write(JSON.pretty_generate(new_info))
       f.close
 
       puts "SLEEPING NOW"
