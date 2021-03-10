@@ -88,7 +88,12 @@ class FourPleroma
     req.set_form({"file" => File.open(filename)}, "multipart/form-data")
 
     res = http.request(req)
-    response = JSON.parse(res.body)
+
+    begin
+      response = JSON.parse(res.body)
+    rescue JSON::ParserError
+      return
+    end
     
     uri = URI.parse("https://#{@instance}/api/v1/statuses")
     header = {
