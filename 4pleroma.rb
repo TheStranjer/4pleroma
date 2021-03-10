@@ -78,13 +78,14 @@ class FourPleroma
     http = Net::HTTP.new(uri.host, uri.port)
     http.use_ssl = true
 
-    f = File.open("temp", "w")
+    filename = "#{post['filename']}#{post['ext']}"
+    f = File.open(filename, "w")
     f.write(img)
     f.close
 
     req = Net::HTTP::Post.new(uri.request_uri)
     req['Authorization'] = "Bearer #{bearer_token}"
-    req.set_form({"file" => File.open("temp")}, "multipart/form-data")
+    req.set_form({"file" => File.open(filename)}, "multipart/form-data")
 
     res = http.request(req)
     response = JSON.parse(res.body)
@@ -107,6 +108,8 @@ class FourPleroma
     puts req.body
 
     res = http.request(req)
+
+    File.delete(filename)
   end
 
   def process_html(html)
