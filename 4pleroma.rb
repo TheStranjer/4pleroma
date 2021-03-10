@@ -2,16 +2,17 @@ require 'json'
 require 'net/http'
 
 class FourPleroma
-  attr_accessor :info, :old_threads, :bearer_token, :instance, :filename, :skip_first
+  attr_accessor :info, :old_threads, :bearer_token, :instance, :filename, :skip_first, :name
 
-  def initialize(fn)
+  def initialize(fn, info = nil)
     @filename = fn
-    @info = JSON.parse(File.open(filename, "r").read)
+    @info = info || JSON.parse(File.open(filename, "r").read)
     @bearer_token = info['bearer_token']
     @instance = info['instance']
     @old_threads = []
     @skip_first = true
     @info["badwords"].collect! { |badword| badword.downcase }
+    @name = info['name']
   end
 
   def start
@@ -53,14 +54,14 @@ class FourPleroma
         thread_badwords = thread_words & info["badwords"]
 
         if thread_badwords.length > 0
-          puts "\tSkipping thread for detected bad words: #{thread_badwords.to_s}"
+          puts "\tSkipping #{name} - #{thread_no} for detected bad words: #{thread_badwords.to_s}"
           info["threads_touched"][thread_no] = Float::INFINITY
           next
         end
 
         posts.select! { |x| x["time"] >= info["threads_touched"][thread_no].to_i and x["tim"] }
         posts.each do |post|
-          post_image(info['image_url'].gsub("%%TIM%%", post["tim"].to_s).gsub("%%EXT%%", post["ext"]), post)
+          post_image(info['image_url'].gsub("%%TIM%%", post["tim"].to_s).gsub("%%EXT%%", post["ext"]), post, thread)
         end
 
         info["threads_touched"][thread_no] = timestamp.to_i
@@ -73,7 +74,7 @@ class FourPleroma
       f.write(JSON.pretty_generate(new_info))
       f.close
 
-      puts "SLEEPING NOW"
+      puts "SLEEPING NOW: #{name}"
 
       @skip_first = false
       sleep 60
@@ -89,8 +90,7 @@ class FourPleroma
     text.to_s.downcase.scan(/[\w']+/)
   end
 
-  def post_image(url, post)
-    puts "\tFOUND NEW IMAGE: #{url}"
+  def post_image(url, post, thread)
     return if @skip_first
     img = Net::HTTP.get(URI(url))
 
@@ -132,7 +132,7 @@ class FourPleroma
       'media_ids'    => [response['id']]
     }.to_json
 
-    puts req.body
+    puts "\tUPLOADED NEW IMAGE FROM #{name} #{thread['no']}}: #{req.body}"
 
     res = http.request(req)
 
@@ -151,4 +151,25 @@ class FourPleroma
   end
 end
 
-FourPleroma.new(ARGV.find { |x| /\.json$/i.match(x) } || "info.json").start
+config_files = ARGV.select { |x| /\.json$/i.match(x) }
+
+infos = {}
+badwords = []
+threads = {}
+
+config_files.each do |cf|
+    infos[cf] = JSON.parse(File.open(cf, "r").read)
+    badwords += infos[cf]["badwords"]
+end
+
+badwords.uniq!
+
+config_files.each do |cf|
+  infos[cf]["badwords"] = badwords
+  threads[cf] = Thread.new do
+    FourPleroma.new(cf, infos[cf]).start
+  end
+end
+
+threads.each { |cf,thr| thr.join }
+
