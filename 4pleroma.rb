@@ -43,7 +43,11 @@ class FourPleroma
         next if info["threads_touched"].keys.include?(thread_no) and info["threads_touched"][thread_no] >= (thread["last_modified"]-600)
         thread_url = info['thread_url'].gsub("%%NUMBER%%", thread_no.to_s)
         puts "EXAMINING THREAD: #{thread_url}"
-        posts = JSON.parse(Net::HTTP.get(URI(thread_url)))["posts"]
+        begin
+          posts = JSON.parse(Net::HTTP.get(URI(thread_url)))["posts"]
+        rescue JSON::ParserError
+          next
+        end
 
         thread_words = posts.collect { |post| post_words(post) }.flatten.uniq
         thread_badwords = thread_words & info["badwords"]
