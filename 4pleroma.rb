@@ -50,7 +50,7 @@ class FourPleroma
 
         if thread_badwords.length > 0
           puts "\tSkipping thread for detected bad words: #{thread_badwords.to_s}"
-          info["threads_touched"][thread_no] = timestamp.to_i
+          info["threads_touched"][thread_no] = Float::INFINITY
           next
         end
 
