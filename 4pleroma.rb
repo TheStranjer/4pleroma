@@ -159,7 +159,7 @@ threads = {}
 
 config_files.each do |cf|
     infos[cf] = JSON.parse(File.open(cf, "r").read)
-    badwords += infos[cf]["badwords"]
+    badwords += infos[cf]["badwords"] if infos[cf]["badwords"].class == Array
 end
 
 badwords.uniq!
