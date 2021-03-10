@@ -39,11 +39,16 @@ class FourPleroma
 
       threads.each do |thread|
         thread_no = thread["no"].to_s
-        next if info["threads_touched"].keys.include?(thread_no) and info["threads_touched"][thread_no] >= (thread["last_modified"] - 600)
+        next if info["threads_touched"].keys.include?(thread_no) and info["threads_touched"][thread_no] >= (thread["last_modified"]-600)
         thread_url = info['thread_url'].gsub("%%NUMBER%%", thread_no.to_s)
         puts "EXAMINING THREAD: #{thread_url}"
-        posts = JSON.parse(Net::HTTP.get(URI(thread_url)))["posts"].select { |x| x["time"] >= info["threads_touched"][thread_no].to_i and x["tim"] }
-        next if posts.any? { |post| info["badwords"].any? { |bw| post["com"].to_s.downcase.include?(bw.downcase) or post["title"].to_s.downcase.include?(bw.downcase) } }
+        posts = JSON.parse(Net::HTTP.get(URI(thread_url)))["posts"]
+        if posts.any? { |post| info["badwords"].any? { |bw| post["com"].to_s.downcase.include?(bw.downcase) or post["sub"].to_s.downcase.include?(bw.downcase) } }
+          puts "\tSkipping thread for detected badword: #{posts.collect { |post| info["badwords"].select { |bw| post["com"].to_s.downcase.include?(bw.downcase) or post["sub"].to_s.downcase.include?(bw.downcase) } }.flatten.uniq.to_s }"
+          info["threads_touched"][thread_no] = timestamp.to_i
+          next
+        end
+        posts.select! { |x| x["time"] >= info["threads_touched"][thread_no].to_i and x["tim"] }
         posts.each do |post|
           post_image(info['image_url'].gsub("%%TIM%%", post["tim"].to_s).gsub("%%EXT%%", post["ext"]), post)
         end
