@@ -51,8 +51,6 @@ class FourPleroma
         if thread_badwords.length > 0
           puts "\tSkipping thread for detected bad words: #{thread_badwords.to_s}"
           next
-        else
-          puts "\tNo bad words found, but did find these acceptable words: #{thread_words.to_s}"
         end
 
         posts.select! { |x| x["time"] >= info["threads_touched"][thread_no].to_i and x["tim"] }
