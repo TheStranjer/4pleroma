@@ -76,7 +76,7 @@ class FourPleroma
 
         thread = info['old_threads'].find { |thr| thr['no'].to_i == tno.to_i }
 
-        puts "Got a reblog for #{tno}, making its based level #{how_based(thread)} and its gay level #{how_cringe(thread)}"
+        puts "REBLOG #{name} - #{tno}, Based: #{how_based(thread)}, Cringe: #{how_cringe(thread)}"
       end
 
       threads.each do |thread|
@@ -84,10 +84,7 @@ class FourPleroma
         next if info["threads_touched"].keys.include?(thread_no) and info["threads_touched"][thread_no] >= (thread['last_modified'] - info['janny_lag'])
         based = how_based(thread)
         cringe = how_cringe(thread)
-        if cringe > based
-          puts "Skipping #{name} - #{thread_no} for not being cool enough: #{based} < #{cringe}"
-          next
-        end
+        next if cringe > based
         thread_url = info['thread_url'].gsub("%%NUMBER%%", thread_no.to_s)
         puts "EXAMINING THREAD: #{thread_url}; #{based} >= #{cringe}"
         begin
