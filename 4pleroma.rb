@@ -86,7 +86,7 @@ class FourPleroma
         cringe = how_cringe(thread)
         next if cringe > based
         thread_url = info['thread_url'].gsub("%%NUMBER%%", thread_no.to_s)
-        puts "EXAMINING THREAD: #{thread_url}; #{based} >= #{cringe}"
+        puts "EXAMINING THREAD: #{name} - #{thread_no}; #{based} >= #{cringe}"
         begin
           posts = JSON.parse(Net::HTTP.get(URI(thread_url)))["posts"]
         rescue JSON::ParserError
