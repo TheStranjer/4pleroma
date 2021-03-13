@@ -1,5 +1,6 @@
 require 'json'
 require 'net/http'
+require 'pry'
 
 class FourPleroma
   attr_accessor :info, :old_threads, :bearer_token, :instance, :filename, :skip_first, :name
@@ -20,6 +21,8 @@ class FourPleroma
 
     info["threads_touched"] ||= {}
 
+    info['based_cringe'] ||= {}
+
     while true
       timestamp = Time.now.to_i
 
@@ -27,23 +30,66 @@ class FourPleroma
       threads.collect! { |x| x["threads"] }
       threads.flatten!
 
-      new_threads = {}
-
-      otn = thread_numbers(old_threads)
+      otn = thread_numbers(threads)
       ntn = thread_numbers(threads)
 
-      deleted_thread_numbers = otn - ntn
+      dtn = otn - ntn
 
-      threads.reject! { |x| deleted_thread_numbers.include?(x["no"]) }
+      puts "Removed the following threads from #{name} due to expiration: #{dtn}"
 
-      info["threads_touched"].reject! { |k, v| deleted_thread_numbers.include?(k) }
+      info['threads_touched'].select! { |k, v| ntn.include?(k.to_i) }
+      info['based_cringe'].select! {|k, v| ntn.include?(k.to_i) }
+
       info["old_threads"] = threads
+
+      rate_limit_exponent = 0
+
+      notifications.each do |notif|
+        info['last_notification_id'] = notif['id'].to_i if notif['id'].to_i > info['last_notification_id'].to_i
+
+        next if notif['type'] != 'reblog'
+        status_id = notif['status']['id']
+        tno = nil
+        pno = nil
+
+        info['based_cringe'].each do |thread_no, contents|
+          next if contents['posts'].nil?
+
+          pno = contents['posts'].find { |post_no, post_contents| post_contents['pleroma_id'] == status_id }
+          pno = pno.first if pno
+          puts "Found PNO: #{pno}" if pno
+
+          if pno
+            tno = thread_no
+            break
+          end
+        end
+
+        next if tno.nil?
+
+        info['based_cringe'][tno] = {} if info['based_cringe'][tno].nil?
+        info['based_cringe'][tno]['posts'] = {} if info['based_cringe'][tno]['posts'].nil?
+        info['based_cringe'][tno]['posts'][pno] = {} if info['based_cringe'][tno]['posts'][pno].nil?
+        info['based_cringe'][tno]['posts'][pno]['based'] = [] if info['based_cringe'][tno]['posts'][pno]['based'].nil?
+        info['based_cringe'][tno]['posts'][pno]['based'].push(notif['account']['fqn'])
+        info['based_cringe'][tno]['posts'][pno]['based'].uniq!
+
+        thread = info['old_threads'].find { |thr| thr['no'].to_i == tno.to_i }
+
+        puts "Got a reblog for #{tno}, making its based level #{how_based(thread)} and its gay level #{how_cringe(thread)}"
+      end
 
       threads.each do |thread|
         thread_no = thread["no"].to_s
-        next if info["threads_touched"].keys.include?(thread_no) and info["threads_touched"][thread_no] >= (info['janny_lag'])
+        next if info["threads_touched"].keys.include?(thread_no) and info["threads_touched"][thread_no] >= (thread['last_modified'] - info['janny_lag'])
+        based = how_based(thread)
+        cringe = how_cringe(thread)
+        if cringe > based
+          puts "Skipping #{name} - #{thread_no} for not being cool enough: #{based} < #{cringe}"
+          next
+        end
         thread_url = info['thread_url'].gsub("%%NUMBER%%", thread_no.to_s)
-        puts "EXAMINING THREAD: #{thread_url}"
+        puts "EXAMINING THREAD: #{thread_url}; #{based} >= #{cringe}"
         begin
           posts = JSON.parse(Net::HTTP.get(URI(thread_url)))["posts"]
         rescue JSON::ParserError
@@ -101,6 +147,7 @@ class FourPleroma
     http.use_ssl = true
 
     filename = "#{post['filename']}#{post['ext']}"
+
     f = File.open(filename, "w")
     f.write(img)
     f.close
@@ -132,11 +179,23 @@ class FourPleroma
       'media_ids'    => [response['id']]
     }.to_json
 
-    puts "\tUPLOADED NEW IMAGE FROM #{name} #{thread['no']}}: #{req.body}"
-
     res = http.request(req)
 
     File.delete(filename)
+
+    begin
+      json_res = JSON.parse(res.body)
+    rescue JSON::ParserError
+      return
+    end
+
+    tno = thread['no'].to_s
+    pno = post['no'].to_s
+    info['based_cringe'] = {} if info['based_cringe'].nil?
+    info['based_cringe'][tno] = { 'posts' => {} } if info['based_cringe'][tno].nil?
+    info['based_cringe'][tno]['posts'][pno] = { 'pleroma_id' => json_res['id'] } if info['based_cringe'][tno]['posts'][pno].nil?
+
+    puts "NEW IMAGE ON #{name} - #{tno}: #{filename}, with based rating now at #{how_based(thread)} and cringe rating now at #{how_cringe(thread)}"
   end
 
   def process_html(html)
@@ -148,6 +207,35 @@ class FourPleroma
 
   def thread_numbers(threads)
     threads.collect { |x| x["no"] }
+  end
+
+  def notifications
+    url = "https://#{instance}/api/v1/notifications?with_muted=true&limit=20"
+    url += "&since_id=#{info['last_notification_id']}" if info['last_notification_id']
+
+    uri = URI.parse(url)
+    header = {'Authorization': "Bearer #{bearer_token}"}
+
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+
+    req = Net::HTTP::Get.new(uri.request_uri, header)
+
+    res = http.request(req)
+
+    JSON.parse(res.body)
+  end
+
+  def how_based(thread, start=0)
+    tno = thread['no'].to_s
+    return start if info['based_cringe'][tno].nil?
+    info['based_cringe'][tno]['posts'].sum { |no, post| post['based'].nil? ? 0 : post['based'].length } + start
+  end
+
+  def how_cringe(thread, start=0)
+    tno = thread['no'].to_s
+    return start if info['based_cringe'][tno].nil?
+    info['based_cringe'][tno]['posts'].length + start
   end
 end
 
