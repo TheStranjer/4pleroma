@@ -35,7 +35,7 @@ class FourPleroma
 
       dtn = otn - ntn
 
-      puts "Removed the following threads from #{name} due to expiration: #{dtn}"
+      puts "Removed the following threads from #{name} due to expiration: #{dtn}" if dtn.size > 0
 
       info['threads_touched'].select! { |k, v| ntn.include?(k.to_i) }
       info['based_cringe'].select! {|k, v| ntn.include?(k.to_i) }
