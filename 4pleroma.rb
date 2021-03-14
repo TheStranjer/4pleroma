@@ -220,7 +220,11 @@ class FourPleroma
 
     res = http.request(req)
 
-    JSON.parse(res.body)
+    begin
+      JSON.parse(res.body)
+    rescue
+      []
+    end
   end
 
   def how_based(thread, start=0)
