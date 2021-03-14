@@ -79,6 +79,8 @@ class FourPleroma
         puts "REBLOG #{name} - #{tno}, Based: #{how_based(thread)}, Cringe: #{how_cringe(thread)}"
       end
 
+      images_uploaded = 0
+
       threads.each do |thread|
         thread_no = thread["no"].to_s
         next if info["threads_touched"].keys.include?(thread_no) and info["threads_touched"][thread_no] >= (thread['last_modified'] - info['janny_lag'])
@@ -105,6 +107,7 @@ class FourPleroma
         posts.select! { |x| x["time"] >= info["threads_touched"][thread_no].to_i and x["tim"] }
         posts.each do |post|
           post_image(info['image_url'].gsub("%%TIM%%", post["tim"].to_s).gsub("%%EXT%%", post["ext"]), post, thread)
+          images_uploaded += 1
         end
 
         info["threads_touched"][thread_no] = timestamp.to_i
@@ -117,10 +120,12 @@ class FourPleroma
       f.write(JSON.pretty_generate(new_info))
       f.close
 
-      puts "SLEEPING NOW: #{name}"
+      sleeping_for = 60 * (2 ** images_uploaded)
+
+      puts "SLEEPING NOW: #{name} until #{Time.at(Time.now.to_i + sleeping_for).strftime("%I:%M %p")} (#{sleeping_for}s)"
 
       @skip_first = false
-      sleep 60
+      sleep sleeping_for
     end
   end
 
