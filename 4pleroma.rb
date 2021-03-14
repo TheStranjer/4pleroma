@@ -3,7 +3,7 @@ require 'net/http'
 require 'pry'
 
 class FourPleroma
-  attr_accessor :info, :old_threads, :bearer_token, :instance, :filename, :skip_first, :name
+  attr_accessor :info, :old_threads, :bearer_token, :instance, :filename, :skip_first, :name, :max_sleep_time, :visibility_listing
 
   def initialize(fn, info = nil)
     @filename = fn
@@ -14,6 +14,8 @@ class FourPleroma
     @skip_first = true
     @info["badwords"].collect! { |badword| badword.downcase }
     @name = info['name']
+    @max_sleep_time = info['max_sleep_time'] || 3600
+    @visibility_listing = info['visibility_listing'] || 'public'
   end
 
   def start
@@ -120,7 +122,7 @@ class FourPleroma
       f.write(JSON.pretty_generate(new_info))
       f.close
 
-      sleeping_for = [60 * (2 ** images_uploaded), 3600].min
+      sleeping_for = [60 * (2 ** images_uploaded), max_sleep_time].min
 
       puts "SLEEPING NOW: #{name} until #{Time.at(Time.now.to_i + sleeping_for).strftime("%I:%M %p")} (#{sleeping_for}s)"
 
@@ -176,7 +178,7 @@ class FourPleroma
     req.body = {
       'status'       => "#{info['content_prepend']}#{process_html(post['com'])}#{info['content_append']}",
       'source'       => '4pleroma',
-      'visibility'   => 'public',
+      'visibility'   => visibility_listing,
       'content_type' => 'text/html',
       'media_ids'    => [response['id']]
     }.to_json
