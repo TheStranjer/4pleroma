@@ -120,7 +120,7 @@ class FourPleroma
       f.write(JSON.pretty_generate(new_info))
       f.close
 
-      sleeping_for = 60 * (2 ** images_uploaded)
+      sleeping_for = [60 * (2 ** images_uploaded), 3600].min
 
       puts "SLEEPING NOW: #{name} until #{Time.at(Time.now.to_i + sleeping_for).strftime("%I:%M %p")} (#{sleeping_for}s)"
 
