@@ -99,7 +99,7 @@ module FourPleroma
   end
 
   class Main
-    attr_accessor :info, :old_threads, :bearer_token, :instance, :filename, :skip_first, :name, :max_sleep_time, :visibility_listing, :schema
+    attr_accessor :info, :old_threads, :bearer_token, :instance, :filename, :skip_first, :name, :max_sleep_time, :visibility_listing, :schema, :queue_wait, :queue
 
     def initialize(fn, info = nil)
       @filename = fn
@@ -113,9 +113,25 @@ module FourPleroma
       @max_sleep_time = info['max_sleep_time'] || 3600
       @visibility_listing = info['visibility_listing'] || 'public'
       @schema = info['schema'] || '4chan'
+      @queue_wait = info['queue_wait'] || 600
+      @queue = []
     end
 
-    def start
+    def start_pop_queue
+      while true
+        puts "WILL POP #{name}'s QUEUE AT: #{Time.at(Time.now.to_i + queue_wait).strftime("%I:%M %p")} (#{queue_wait}s)"
+        sleep queue_wait
+
+        queue.shuffle!
+        candidate = queue.pop
+
+        next if candidate.nil?
+
+        post_image(info['image_url'].gsub("%%TIM%%", candidate[:post].remote_filename).gsub("%%EXT%%", candidate[:post].ext), candidate[:post], candidate[:thread])
+      end
+    end
+
+    def start_build_queue
       puts "4pleroma bot, watching catalog: #{info['catalog_url']}"
 
       info["threads_touched"] ||= {}
@@ -134,7 +150,11 @@ module FourPleroma
 
         dtn = otn - ntn
 
+        deleted_elements = queue.select { |el| dtn.include?(el[:thread].no) }
+        queue.reject! { |el| dtn.include?(el[:thread].no) }
+
         puts "Removed the following threads from #{name} due to expiration: #{dtn}" if dtn.size > 0
+        puts "Removed #{deleted_elements.length} elements from the #{name} queue" if deleted_elements.length > 0
 
         info['threads_touched'].select! { |k, v| ntn.include?(k.to_s) }
         info['based_cringe'].select! {|k, v| ntn.include?(k.to_s) }
@@ -174,10 +194,22 @@ module FourPleroma
 
           thread = Thread.new(info['old_threads'].find { |thr| thr['no'].to_i == tno.to_i })
 
-          puts "REBLOG #{name} - #{tno}, Based: #{how_based(thread)}, Cringe: #{how_cringe(thread)}"
-        end
+          based = how_based(thread)
+          cringe = how_cringe(thread)
+          puts "REBLOG #{name} - #{tno}, Based: #{based}, Cringe: #{cringe}"
 
-        images_uploaded = 0
+          next if based < cringe
+
+          options = queue.select {|x| x[:thread].no == tno.to_s }
+
+          next if options.length == 0
+
+          options.shuffle!
+          candidate = options.pop
+
+          puts "FAST TRACKING QUEUED IMAGE FROM #{name} FOR THREAD #{thread.no} DUE TO USER OPT-IN"
+          post_image(info['image_url'].gsub("%%TIM%%", candidate[:post].remote_filename).gsub("%%EXT%%", candidate[:post].ext), candidate[:post], candidate[:thread])
+        end
 
         catalog.threads.each do |thread|
           next if info["threads_touched"].keys.include?(thread.no) and info["threads_touched"][thread.no] >= (thread.last_modified - info['janny_lag'])
@@ -202,8 +234,19 @@ module FourPleroma
           end
          
           thread.posts.select { |p| p.posted_at >= info["threads_touched"][thread.no].to_i and p.remote_filename.length > 0 }.each do |p|
-            post_image(info['image_url'].gsub("%%TIM%%", p.remote_filename).gsub("%%EXT%%", p.ext), p, thread)
-            images_uploaded += 1
+            based = how_based(thread)
+            cringe = how_cringe(thread)
+            if based > 0 and based >= cringe
+              puts "FAST TRACKING NEWLY-DISCOVERED IMAGE FOR #{name} FOR THREAD #{thread.no} DUE TO USER OPT-IN"
+              post_image(info['image_url'].gsub("%%TIM%%", p.remote_filename).gsub("%%EXT%%", p.ext), p, thread)
+            else
+              queue.push({
+                :post => p,
+                :thread => thread
+              })
+
+              puts "ADDED #{name} - #{thread.no} - #{p.no} TO QUEUE, BRINGING ITS SIZE TO #{queue.length}"
+            end
           end
 
           info["threads_touched"][thread.no] = timestamp.to_i
@@ -216,12 +259,8 @@ module FourPleroma
         f.write(JSON.pretty_generate(new_info))
         f.close
 
-        sleeping_for = @skip_first ? 60 : [60 * (2 ** images_uploaded), max_sleep_time].min
-
-        puts "SLEEPING NOW: #{name} until #{Time.at(Time.now.to_i + sleeping_for).strftime("%I:%M %p")} (#{sleeping_for}s)"
-
         @skip_first = false
-        sleep sleeping_for
+        sleep 60
       end
     end
 
@@ -232,7 +271,14 @@ module FourPleroma
 
     def post_image(url, post, thread)
       return if @skip_first
-      img = Net::HTTP.get(URI(url))
+      res = Net::HTTP.get_response(URI(url))
+
+      if res.code != '200'
+        puts "ERROR'D OUT ON #{name} - #{thread.no} - #{post.no}"
+        return
+      end
+
+      img = res.body
 
       uri = URI.parse("https://#{instance}/api/v1/media")
       header = {'Authorization': "Bearer #{bearer_token}"}
@@ -350,8 +396,12 @@ badwords.uniq!
 
 config_files.each do |cf|
   infos[cf]["badwords"] = badwords unless infos[cf]["isolated_badwords"] == true
-  threads[cf] = Thread.new do
-    FourPleroma::Main.new(cf, infos[cf]).start
+  four_pleroma = FourPleroma::Main.new(cf, infos[cf])
+  threads["#{cf} build_queue"] = Thread.new do
+    four_pleroma.start_build_queue
+  end
+  threads["#{cf} pop_queue"] = Thread.new do
+    four_pleroma.start_pop_queue
   end
 end
 
