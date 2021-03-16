@@ -335,6 +335,8 @@ module FourPleroma
       info['based_cringe'][tno] = { 'posts' => {} } if info['based_cringe'][tno].nil?
       info['based_cringe'][tno]['posts'][pno] = { 'pleroma_id' => json_res['id'] } if info['based_cringe'][tno]['posts'][pno].nil?
 
+      queue.reject! { |el| el[:post].no == post.no and el[:thread].no == thread.no }
+
       puts "NEW IMAGE ON #{name} - #{tno}: #{filename}, with based rating now at #{how_based(thread)} and cringe rating now at #{how_cringe(thread)}"
     end
 
