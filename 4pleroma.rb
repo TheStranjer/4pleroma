@@ -342,7 +342,7 @@ module FourPleroma
 
     def process_html(html)
       return "" if html.nil?
-      html.gsub(/<a href="#p\d+" class="quotelink">&gt;&gt;\d+<\/a>/, "")
+      html.gsub(/<a href=".+" class="quotelink">&gt;&gt;\d+<\/a>/, "")
           .gsub(/^&gt;(.+)$/, "<font color='#789922'>&gt;\\1</font>")
     end
 
