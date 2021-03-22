@@ -353,20 +353,20 @@ module FourPleroma
     end
 
     def notifications
-      url = "https://#{instance}/api/v1/notifications?with_muted=true&limit=20"
-      url += "&since_id=#{info['last_notification_id']}" if info['last_notification_id']
-
-      uri = URI.parse(url)
-      header = {'Authorization': "Bearer #{bearer_token}"}
-
-      http = Net::HTTP.new(uri.host, uri.port)
-      http.use_ssl = true
-
-      req = Net::HTTP::Get.new(uri.request_uri, header)
-
-      res = http.request(req)
-
       begin
+        url = "https://#{instance}/api/v1/notifications?with_muted=true&limit=20"
+        url += "&since_id=#{info['last_notification_id']}" if info['last_notification_id']
+
+        uri = URI.parse(url)
+        header = {'Authorization': "Bearer #{bearer_token}"}
+
+        http = Net::HTTP.new(uri.host, uri.port)
+        http.use_ssl = true
+
+        req = Net::HTTP::Get.new(uri.request_uri, header)
+
+        res = http.request(req)
+
         JSON.parse(res.body)
       rescue
         []
