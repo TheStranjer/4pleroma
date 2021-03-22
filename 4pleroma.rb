@@ -225,7 +225,7 @@ module FourPleroma
           end
 
           thread_words = thread.words.uniq
-          thread_badwords = thread_words & info["badwords"]
+          thread_badwords = thread_words.select { |tw| info["badwords"].any? { |bw| bw == tw } || info["badregex"].any? { |br| %r{#{br}}i.match(tw) } }
 
           if thread_badwords.length > 0
             puts "\tSkipping #{name} - #{thread.no} for detected bad words: #{thread_badwords.to_s}"
@@ -387,17 +387,21 @@ config_files = ARGV.select { |x| /\.json$/i.match(x) }
 
 infos = {}
 badwords = []
+badregex = []
 threads = {}
 
 config_files.each do |cf|
     infos[cf] = JSON.parse(File.open(cf, "r").read)
     badwords += infos[cf]["badwords"] if infos[cf]["badwords"].class == Array
+    badregex += infos[cf]["badregex"] if infos[cf]["badregex"].class == Array
 end
 
 badwords.uniq!
+badregex.uniq!
 
 config_files.each do |cf|
   infos[cf]["badwords"] = badwords unless infos[cf]["isolated_badwords"] == true
+  infos[cf]["badregex"] = badregex unless infos[cf]["isolated_badregex"] == true
   four_pleroma = FourPleroma::Main.new(cf, infos[cf])
   threads["#{cf} build_queue"] = Thread.new do
     four_pleroma.start_build_queue
