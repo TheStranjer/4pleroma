@@ -99,7 +99,7 @@ module FourPleroma
   end
 
   class Main
-    attr_accessor :info, :old_threads, :bearer_token, :instance, :filename, :skip_first, :name, :max_sleep_time, :visibility_listing, :schema, :queue_wait, :queue
+    attr_accessor :info, :old_threads, :bearer_token, :instance, :filename, :skip_first, :name, :max_sleep_time, :visibility_listing, :schema, :queue_wait, :queue, :sensitive
 
     def initialize(fn, info = nil)
       @filename = fn
@@ -115,6 +115,7 @@ module FourPleroma
       @schema = info['schema'] || '4chan'
       @queue_wait = info['queue_wait'] || 600
       @queue = []
+      @sensitive = info['sensitive'] || false
     end
 
     def start_pop_queue
@@ -315,6 +316,7 @@ module FourPleroma
         'status'       => "#{info['content_prepend']}#{process_html(post.body)}#{info['content_append']}",
         'source'       => '4pleroma',
         'visibility'   => visibility_listing,
+        'sensitive'    => sensitive,
         'content_type' => 'text/html',
         'media_ids'    => [response['id']]
       }.to_json
