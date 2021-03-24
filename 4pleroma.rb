@@ -142,7 +142,11 @@ module FourPleroma
       while true
         timestamp = Time.now.to_i
 
-        catalog = JSON.parse(Net::HTTP.get(URI(info['catalog_url'])))
+        begin
+          catalog = JSON.parse(Net::HTTP.get(URI(info['catalog_url'])))
+        rescue Net::OpenTimeout
+          next
+        end
         
         catalog = Catalog.new(catalog, schema)
 
