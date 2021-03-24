@@ -28,6 +28,7 @@ The JSON file in question has a series of fields, some of which you may edit, an
 * `badwords` -- an array of bad words. Threads using these words at all will not be examined for new things to add to the queue
 * `badregex` -- like `badwords`, except these are regular expressions (stored as strings to conform to JSON's standard and then converted to regular expressions in Ruby) which exclude all threads that match
 * `sensitive` -- whether to turn the sensitive flag on for posts from this board (defaults to `false` if left blank)
+* `initial_wait` -- (optional) will wait this many seconds before even the initial `queue_wait`; used for staggering posts, so you can have one account with multiple boards being watched
 
 There are some that the bot maintains and you should probably leave alone. They are:
 * `threads_touched` -- a list of threads that have been "touched" (accessed) and when they were most recently accessed

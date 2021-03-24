@@ -99,7 +99,7 @@ module FourPleroma
   end
 
   class Main
-    attr_accessor :info, :old_threads, :bearer_token, :instance, :filename, :skip_first, :name, :max_sleep_time, :visibility_listing, :schema, :queue_wait, :queue, :sensitive
+    attr_accessor :info, :old_threads, :bearer_token, :instance, :filename, :skip_first, :name, :max_sleep_time, :visibility_listing, :schema, :queue_wait, :queue, :sensitive, :initial_wait
 
     def initialize(fn, info = nil)
       @filename = fn
@@ -116,19 +116,23 @@ module FourPleroma
       @queue_wait = info['queue_wait'] || 600
       @queue = []
       @sensitive = info['sensitive'] || false
+      @initial_wait = info['initial_wait'] || queue_wait
     end
 
     def start_pop_queue
-      while true
-        puts "WILL POP #{name}'s QUEUE AT: #{Time.at(Time.now.to_i + queue_wait).strftime("%I:%M %p")} (#{queue_wait}s)"
-        sleep queue_wait
+      puts "WILL START POPPING #{name}'s QUEUE AT: #{Time.at(Time.now.to_i + initial_wait).strftime("%I:%M %p")} (#{initial_wait}s)"
+      sleep initial_wait
 
+      while true
         queue.shuffle!
         candidate = queue.pop
 
         next if candidate.nil?
 
         post_image(info['image_url'].gsub("%%TIM%%", candidate[:post].remote_filename).gsub("%%EXT%%", candidate[:post].ext), candidate[:post], candidate[:thread])
+
+        puts "WILL POP #{name}'s QUEUE AT: #{Time.at(Time.now.to_i + queue_wait).strftime("%I:%M %p")} (#{queue_wait}s)"
+        sleep queue_wait
       end
     end
 
