@@ -127,7 +127,11 @@ module FourPleroma
         queue.shuffle!
         candidate = queue.pop
 
-        next if candidate.nil?
+        if candidate.nil?
+          puts "WILL POP #{name}'s QUEUE AT: #{Time.at(Time.now.to_i + queue_wait).strftime("%I:%M %p")} (#{queue_wait}s)"
+          sleep queue_wait
+          next
+        end
 
         post_image(info['image_url'].gsub("%%TIM%%", candidate[:post].remote_filename).gsub("%%EXT%%", candidate[:post].ext), candidate[:post], candidate[:thread])
 
