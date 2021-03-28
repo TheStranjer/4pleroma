@@ -1,3 +1,10 @@
+GIT
+  remote: https://github.com/TheStranjer/colorize/
+  revision: 7126aaace7ce9d17892e1f2e841ddd0da3fc7e3c
+  branch: support_nonstrings
+  specs:
+    colorize (0.8.1)
+
 GEM
   remote: https://rubygems.org/
   specs:
@@ -11,6 +18,7 @@ PLATFORMS
   x86_64-linux
 
 DEPENDENCIES
+  colorize!
   pry
 
 BUNDLED WITH

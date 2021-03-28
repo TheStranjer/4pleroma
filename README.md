@@ -7,7 +7,7 @@
 Like this:
 
 ```sh
-ruby 4pleroma board_1.json board_2.json
+bundle exec ruby 4pleroma board_1.json board_2.json
 ```
 
 This will start up a separate instance of the bot, using two threads each. Two for `board_1.json` and two for `board_2.json`.

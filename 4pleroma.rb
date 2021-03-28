@@ -1,10 +1,17 @@
 require 'json'
 require 'net/http'
 require 'pry'
+require 'colorize'
 
 class String
   def words
     self.downcase.scan(/[\w']+/)
+  end
+end
+
+class Array
+  def to_unescaped_s
+    "[" + collect { |el| "\"#{el.to_s}\"" }.join(', ') + "]"
   end
 end
 
@@ -120,7 +127,7 @@ module FourPleroma
     end
 
     def start_pop_queue
-      puts "WILL START POPPING #{name}'s QUEUE AT: #{Time.at(Time.now.to_i + initial_wait).strftime("%I:%M %p")} (#{initial_wait}s)"
+      puts "WILL START POPPING #{name.cyan}'s QUEUE AT: #{Time.at(Time.now.to_i + initial_wait).strftime("%I:%M %p").yellow} (#{initial_wait.yellow}s)"
       sleep initial_wait
 
       while true
@@ -128,20 +135,20 @@ module FourPleroma
         candidate = queue.pop
 
         if candidate.nil?
-          puts "WILL POP #{name}'s QUEUE AT: #{Time.at(Time.now.to_i + queue_wait).strftime("%I:%M %p")} (#{queue_wait}s)"
+          puts "WILL POP #{name.cyan}'s QUEUE AT: #{Time.at(Time.now.to_i + queue_wait).strftime("%I:%M %p").yellow} (#{queue_wait.yellow}s)"
           sleep queue_wait
           next
         end
 
         post_image(info['image_url'].gsub("%%TIM%%", candidate[:post].remote_filename).gsub("%%EXT%%", candidate[:post].ext), candidate[:post], candidate[:thread])
 
-        puts "WILL POP #{name}'s QUEUE AT: #{Time.at(Time.now.to_i + queue_wait).strftime("%I:%M %p")} (#{queue_wait}s)"
+        puts "WILL POP #{name.cyan}'s QUEUE AT: #{Time.at(Time.now.to_i + queue_wait).strftime("%I:%M %p").yellow} (#{queue_wait.yellow}s)"
         sleep queue_wait
       end
     end
 
     def start_build_queue
-      puts "4pleroma bot, watching catalog: #{info['catalog_url']}"
+      puts "4pleroma bot, watching catalog: #{info['catalog_url'].cyan}"
 
       info["threads_touched"] ||= {}
 
@@ -166,8 +173,8 @@ module FourPleroma
         deleted_elements = queue.select { |el| dtn.include?(el[:thread].no) }
         queue.reject! { |el| dtn.include?(el[:thread].no) }
 
-        puts "Removed the following threads from #{name} due to expiration: #{dtn}" if dtn.size > 0
-        puts "Removed #{deleted_elements.length} elements from the #{name} queue" if deleted_elements.length > 0
+        puts "Removed the following threads from #{name.cyan} due to expiration: #{dtn.red.to_unescaped_s}" if dtn.size > 0
+        puts "Removed #{deleted_elements.length.red} elements from the #{name.cyan} queue" if deleted_elements.length > 0
 
         info['threads_touched'].select! { |k, v| ntn.include?(k.to_s) }
         info['based_cringe'].select! {|k, v| ntn.include?(k.to_s) }
@@ -209,7 +216,7 @@ module FourPleroma
 
           based = how_based(thread)
           cringe = how_cringe(thread)
-          puts "REBLOG #{name} - #{tno}, Based: #{based}, Cringe: #{cringe}"
+          puts "REBLOG #{name.cyan} - #{tno.cyan}, Based: #{based.green}, Cringe: #{cringe.red}"
 
           next if based < cringe
 
@@ -220,7 +227,7 @@ module FourPleroma
           options.shuffle!
           candidate = options.pop
 
-          puts "FAST TRACKING QUEUED IMAGE FROM #{name} FOR THREAD #{thread.no} DUE TO USER OPT-IN"
+          puts "FAST TRACKING QUEUED IMAGE FROM #{name.cyan} FOR THREAD #{thread.no.green} DUE TO USER OPT-IN"
           post_image(info['image_url'].gsub("%%TIM%%", candidate[:post].remote_filename).gsub("%%EXT%%", candidate[:post].ext), candidate[:post], candidate[:thread])
         end
 
@@ -230,7 +237,7 @@ module FourPleroma
           cringe = how_cringe(thread)
           next if cringe > based
           thread_url = info['thread_url'].gsub("%%NUMBER%%", thread.no)
-          puts "EXAMINING THREAD: #{name} - #{thread.no}"
+          puts "EXAMINING THREAD: #{name.cyan} - #{thread.no.cyan}"
           begin
             thread.posts = JSON.parse(Net::HTTP.get(URI(thread_url)))["posts"].collect { |p| Post.new(p, schema) }
           rescue JSON::ParserError
@@ -241,7 +248,7 @@ module FourPleroma
           thread_badwords = thread_words.select { |tw| info["badwords"].any? { |bw| bw == tw } || info["badregex"].any? { |br| %r{#{br}}i.match(tw) } }
 
           if thread_badwords.length > 0
-            puts "\tSkipping #{name} - #{thread.no} for detected bad words: #{thread_badwords.to_s}"
+            puts "\tSkipping #{name.cyan} - #{thread.no.cyan} for detected bad words: #{thread_badwords.red.to_unescaped_s}"
             info["threads_touched"][thread.no] = Float::INFINITY
             next
           end
@@ -250,7 +257,7 @@ module FourPleroma
             based = how_based(thread)
             cringe = how_cringe(thread)
             if based > 0 and based >= cringe
-              puts "FAST TRACKING NEWLY-DISCOVERED IMAGE FOR #{name} FOR THREAD #{thread.no} DUE TO USER OPT-IN"
+              puts "FAST TRACKING NEWLY-DISCOVERED IMAGE FOR #{name.cyan} FOR THREAD #{thread.no.green} DUE TO USER OPT-IN"
               post_image(info['image_url'].gsub("%%TIM%%", p.remote_filename).gsub("%%EXT%%", p.ext), p, thread)
             else
               queue.push({
@@ -258,7 +265,7 @@ module FourPleroma
                 :thread => thread
               })
 
-              puts "ADDED #{name} - #{thread.no} - #{p.no} TO QUEUE, BRINGING ITS SIZE TO #{queue.length}"
+              puts "ADDED #{name.cyan} - #{thread.no.cyan} - #{p.no.cyan} TO QUEUE, BRINGING ITS SIZE TO #{queue.length.cyan}"
             end
           end
 
@@ -287,7 +294,7 @@ module FourPleroma
       res = Net::HTTP.get_response(URI(url))
 
       if res.code != '200'
-        puts "ERROR'D OUT ON #{name} - #{thread.no} - #{post.no}"
+        puts "ERROR'D OUT ON #{name.red} - #{thread.no.red} - #{post.no.red}"
         return
       end
 
@@ -351,7 +358,7 @@ module FourPleroma
 
       queue.reject! { |el| el[:post].no == post.no and el[:thread].no == thread.no }
 
-      puts "NEW IMAGE ON #{name} - #{tno}: #{filename}, with based rating now at #{how_based(thread)} and cringe rating now at #{how_cringe(thread)}"
+      puts "NEW IMAGE ON #{name.cyan} - #{tno.cyan}: #{filename.cyan}, with based rating now at #{how_based(thread).green} and cringe rating now at #{how_cringe(thread).red}"
     end
 
     def process_html(html)
