@@ -157,6 +157,8 @@ module FourPleroma
       while true
         timestamp = Time.now.to_i
 
+        old_queue_posts = queue.collect { |p| p[:post].no }
+
         begin
           catalog = JSON.parse(Net::HTTP.get(URI(info['catalog_url'])))
         rescue Net::OpenTimeout
@@ -174,7 +176,6 @@ module FourPleroma
         queue.reject! { |el| dtn.include?(el[:thread].no) }
 
         puts "Removed the following threads from #{name.cyan} due to expiration: #{dtn.red.to_unescaped_s}" if dtn.size > 0
-        puts "Removed #{deleted_elements.length.red} elements from the #{name.cyan} queue" if deleted_elements.length > 0
 
         info['threads_touched'].select! { |k, v| ntn.include?(k.to_s) }
         info['based_cringe'].select! {|k, v| ntn.include?(k.to_s) }
@@ -234,8 +235,6 @@ module FourPleroma
           queue.reject! { |element| candidate[:post].no == element[:post].no and candidate[:thread].no == element[:thread].no }
         end
 
-        queue_before = queue.length
-
         catalog.threads.each do |thread|
           based = how_based(thread)
           cringe = how_cringe(thread)
@@ -261,7 +260,7 @@ module FourPleroma
           thread_badwords = thread_words.select { |tw| info["badwords"].any? { |bw| bw == tw } || info["badregex"].any? { |br| %r{#{br}}i.match(tw) } }
 
           if thread_badwords.length > 0
-            puts "\tSkipping #{name.cyan} - #{thread.no.cyan} for detected bad words: #{thread_badwords.red.to_unescaped_s}"
+            puts "Skipping #{name.cyan} - #{thread.no.cyan} for detected bad words: #{thread_badwords.red.to_unescaped_s}"
             info["threads_touched"][thread.no] = Float::INFINITY
             next
           end
@@ -276,11 +275,15 @@ module FourPleroma
           info["threads_touched"][thread.no] = timestamp.to_i
         end
 
-        if queue_before < queue.length
-          puts "ADDED #{(queue.length - queue_before).green} TO #{name.cyan} QUEUE, BRINGING ITS SIZE TO #{queue.length.green}"
-        elsif queue_before > queue.length
-          puts "REMOVED #{(queue_before - queue.length).red} TO #{name.cyan} QUEUE, BRINGING ITS SIZE TO #{queue.length.red}"
-        end
+        new_queue_posts = queue.collect { |p| p[:post].no }
+
+        messages = []
+        new_post_count = (new_queue_posts - old_queue_posts).length
+        removed_post_count = (old_queue_posts - new_queue_posts).length
+        messages.push("ADDED #{new_post_count.green} TO") if new_post_count > 0
+        messages.push("REMOVED #{removed_post_count.red} FROM") if removed_post_count > 0
+
+        puts "#{messages.join(' AND ')} THE #{name.cyan} QUEUE, BRINGING THE TOTAL TO #{queue.length.send(removed_post_count > new_post_count ? :red : (new_post_count > removed_post_count ? :green : :cyan))}" if messages.length > 0
 
         new_info = info
         new_info["threads_touched"].select { |k,v| v == Float::INFINITY }.keys.each { |k| new_info["threads_touched"][k] = Time.now.to_i * 2 }
