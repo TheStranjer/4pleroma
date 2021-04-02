@@ -234,6 +234,8 @@ module FourPleroma
           queue.reject! { |element| candidate[:post].no == element[:post].no and candidate[:thread].no == element[:thread].no }
         end
 
+        queue_before = queue.length
+
         catalog.threads.each do |thread|
           based = how_based(thread)
           cringe = how_cringe(thread)
@@ -249,7 +251,6 @@ module FourPleroma
 
           next if info["threads_touched"].keys.include?(thread.no) and info["threads_touched"][thread.no] >= (thread.last_modified - info['janny_lag'])
           thread_url = info['thread_url'].gsub("%%NUMBER%%", thread.no)
-          puts "EXAMINING THREAD: #{name.cyan} - #{thread.no.cyan}"
           begin
             thread.posts = JSON.parse(Net::HTTP.get(URI(thread_url)))["posts"].collect { |p| Post.new(p, schema) }
           rescue JSON::ParserError
@@ -264,17 +265,21 @@ module FourPleroma
             info["threads_touched"][thread.no] = Float::INFINITY
             next
           end
-         
+          
           thread.posts.select { |p| p.posted_at >= info["threads_touched"][thread.no].to_i and p.remote_filename.length > 0 }.each do |p|
             queue.push({
               :post => p,
               :thread => thread
             })
-
-            puts "ADDED #{name.cyan} - #{thread.no.cyan} - #{p.no.cyan} TO QUEUE, BRINGING ITS SIZE TO #{queue.length.cyan}"
           end
 
           info["threads_touched"][thread.no] = timestamp.to_i
+        end
+
+        if queue_before < queue.length
+          puts "ADDED #{(queue.length - queue_before).green} TO #{name.cyan} QUEUE, BRINGING ITS SIZE TO #{queue.length.green}"
+        elsif queue_before > queue.length
+          puts "REMOVED #{(queue_before - queue.length).red} TO #{name.cyan} QUEUE, BRINGING ITS SIZE TO #{queue.length.red}"
         end
 
         new_info = info
