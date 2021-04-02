@@ -210,7 +210,7 @@ module FourPleroma
           info['based_cringe'][tno]['posts'] = {} if info['based_cringe'][tno]['posts'].nil?
           info['based_cringe'][tno]['posts'][pno] = {} if info['based_cringe'][tno]['posts'][pno].nil?
           info['based_cringe'][tno]['posts'][pno]['based'] = [] if info['based_cringe'][tno]['posts'][pno]['based'].nil?
-          info['based_cringe'][tno]['posts'][pno]['based'].push(notif['account']['fqn'])
+          info['based_cringe'][tno]['posts'][pno]['based'].push(notif['account']['acct'] || notif['account']['fqn'])
           info['based_cringe'][tno]['posts'][pno]['based'].uniq!
 
           thread = Thread.new(info['old_threads'].find { |thr| thr['no'].to_i == tno.to_i })
