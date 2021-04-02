@@ -184,6 +184,7 @@ module FourPleroma
         rate_limit_exponent = 0
 
         notifications.each do |notif|
+          next if notif['id'].nil?
           info['last_notification_id'] = notif['id'].to_i if notif['id'].to_i > info['last_notification_id'].to_i
 
           next if notif['type'] != 'reblog'
@@ -330,9 +331,19 @@ module FourPleroma
         'Content-Type' => 'application/json'
       }
 
+      tno = thread.no
+      pno = post.no
+      info['based_cringe'] = {} if info['based_cringe'].nil?
+      info['based_cringe'][tno] = { 'posts' => {} } if info['based_cringe'][tno].nil?
+      info['based_cringe'][tno]['posts'][pno] = {} if info['based_cringe'][tno]['posts'][pno].nil?
+
+      mentions = info['based_cringe'][tno]['posts'].collect { |post_no, post| post['based'] ? post['based'] : [] }.flatten
+      mentions.uniq!
+      mentions.collect! { |mention| "@#{mention}" }
+
       req = Net::HTTP::Post.new(uri.request_uri, header)
       req.body = {
-        'status'       => "#{info['content_prepend']}#{process_html(post.body)}#{info['content_append']}",
+        'status'       => "#{mentions.join(' ')}\n#{info['content_prepend']}#{process_html(post.body)}#{info['content_append']}".strip,
         'source'       => '4pleroma',
         'visibility'   => visibility_listing,
         'sensitive'    => sensitive,
@@ -350,11 +361,7 @@ module FourPleroma
         return
       end
 
-      tno = thread.no
-      pno = post.no
-      info['based_cringe'] = {} if info['based_cringe'].nil?
-      info['based_cringe'][tno] = { 'posts' => {} } if info['based_cringe'][tno].nil?
-      info['based_cringe'][tno]['posts'][pno] = { 'pleroma_id' => json_res['id'] } if info['based_cringe'][tno]['posts'][pno].nil?
+      info['based_cringe'][tno]['posts'][pno]['pleroma_id'] = json_res['id']
 
       queue.reject! { |el| el[:post].no == post.no and el[:thread].no == thread.no }
 
