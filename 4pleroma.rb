@@ -230,13 +230,24 @@ module FourPleroma
 
           puts "FAST TRACKING QUEUED IMAGE FROM #{name.cyan} FOR THREAD #{thread.no.green} DUE TO USER OPT-IN"
           post_image(info['image_url'].gsub("%%TIM%%", candidate[:post].remote_filename).gsub("%%EXT%%", candidate[:post].ext), candidate[:post], candidate[:thread])
+
+          queue.reject! { |element| candidate[:post].no == element[:post].no and candidate[:thread].no == element[:thread].no }
         end
 
         catalog.threads.each do |thread|
-          next if info["threads_touched"].keys.include?(thread.no) and info["threads_touched"][thread.no] >= (thread.last_modified - info['janny_lag'])
           based = how_based(thread)
           cringe = how_cringe(thread)
           next if cringe > based
+          candidates = queue.select { |el| el[:thread].no == thread.no }
+          el = candidates.sample
+          if based > 0 and el
+            puts "FAST TRACKING NEWLY-DISCOVERED IMAGE FOR #{name.cyan} FOR THREAD #{el[:thread].no.green} DUE TO USER OPT-IN"
+
+            post_image(info['image_url'].gsub("%%TIM%%", el[:post].remote_filename).gsub("%%EXT%%", el[:post].ext), el[:post], el[:thread])
+            queue.reject! { |element| el[:post].no == element[:post].no and el[:thread].no == element[:thread].no }
+          end
+
+          next if info["threads_touched"].keys.include?(thread.no) and info["threads_touched"][thread.no] >= (thread.last_modified - info['janny_lag'])
           thread_url = info['thread_url'].gsub("%%NUMBER%%", thread.no)
           puts "EXAMINING THREAD: #{name.cyan} - #{thread.no.cyan}"
           begin
@@ -255,19 +266,12 @@ module FourPleroma
           end
          
           thread.posts.select { |p| p.posted_at >= info["threads_touched"][thread.no].to_i and p.remote_filename.length > 0 }.each do |p|
-            based = how_based(thread)
-            cringe = how_cringe(thread)
-            if based > 0 and based >= cringe
-              puts "FAST TRACKING NEWLY-DISCOVERED IMAGE FOR #{name.cyan} FOR THREAD #{thread.no.green} DUE TO USER OPT-IN"
-              post_image(info['image_url'].gsub("%%TIM%%", p.remote_filename).gsub("%%EXT%%", p.ext), p, thread)
-            else
-              queue.push({
-                :post => p,
-                :thread => thread
-              })
+            queue.push({
+              :post => p,
+              :thread => thread
+            })
 
-              puts "ADDED #{name.cyan} - #{thread.no.cyan} - #{p.no.cyan} TO QUEUE, BRINGING ITS SIZE TO #{queue.length.cyan}"
-            end
+            puts "ADDED #{name.cyan} - #{thread.no.cyan} - #{p.no.cyan} TO QUEUE, BRINGING ITS SIZE TO #{queue.length.cyan}"
           end
 
           info["threads_touched"][thread.no] = timestamp.to_i
