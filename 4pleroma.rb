@@ -107,6 +107,12 @@ module FourPleroma
   end
 
   class Main
+    COMMANDS = {
+      /untag/i => "untag",
+      /notag/i => "notag",
+      /tag/i   => "tag"
+    }
+
     attr_accessor :info, :old_threads, :bearer_token, :instance, :filename, :skip_first, :name, :max_sleep_time, :visibility_listing, :schema, :queue_wait, :queue, :sensitive, :initial_wait
 
     attr_accessor :client
@@ -156,11 +162,65 @@ module FourPleroma
       end
     end
 
-    def new_notification(notif)
-      return if notif['id'].nil?
-      info['last_notification_id'] = notif['id'].to_i if notif['id'].to_i > info['last_notification_id'].to_i
+    def cmd_tag(notif)
+      acct = notif['account']['acct'] || notif['acct']['fqn']
+      info['notag'] ||= []
+      deleted = info['notag'].delete(acct)
 
-      return if notif['type'] != 'reblog'
+      client.statuses({
+        "status"         => "@#{acct} " + (deleted ? "You will now be tagged again by this bot" : "You are already taggable by this bot"),
+        "visibility"     => "direct",
+        "in_reply_to_id" => notif['status']['id']
+      })
+
+      save_info(info)
+    end
+
+    def cmd_notag(notif)
+      acct = notif['account']['acct'] || notif['acct']['fqn']
+      info['notag'] ||= []
+      info['notag'].push(acct)
+      info['notag'].uniq!
+
+      client.statuses({
+        "status"         => "@#{acct} You won't be tagged by this bot in the future",
+        "visibility"     => "direct",
+        "in_reply_to_id" => notif['status']['id']
+      })
+
+      save_info(info)
+    end
+
+    def cmd_untag(notif)
+      reply_to_id = notif['status']['in_reply_to_id']
+      acct = notif['account']['acct'] || notif['acct']['fqn']
+
+      if reply_to_id.nil?
+        client.statuses({
+          "status"         => "@#{acct} I can't untag you from a thread unless you respond to the image post from that thread",
+          "visibility"     => "direct",
+          "in_reply_to_id" => notif['status']['id']
+        })
+
+        return
+      end
+
+      tno = info['based_cringe'].keys.find { |tno| info['based_cringe'][tno]['posts'].any? { |pno, post| post['pleroma_id'] == reply_to_id } }
+      info['based_cringe'][tno] ||= {}
+      info['based_cringe'][tno]['untagged'] ||= []
+      info['based_cringe'][tno]['untagged'].push(acct)
+      info['based_cringe'][tno]['untagged'].uniq!
+
+      client.statuses({
+        "status"         => "@#{acct} You've been untagged from this thread and should not receive any more tags about it",
+        "visibility"     => "direct",
+        "in_reply_to_id" => notif['status']['id']
+      })
+
+      save_info(info)
+    end
+
+    def new_reblog(notif)
       status_id = notif['status']['id']
       tno = nil
       pno = nil
@@ -179,12 +239,19 @@ module FourPleroma
 
       return if tno.nil?
 
+      acct = notif['account']['acct'] || notif['account']['fqn']
+
       info['based_cringe'][tno] = {} if info['based_cringe'][tno].nil?
       info['based_cringe'][tno]['posts'] = {} if info['based_cringe'][tno]['posts'].nil?
       info['based_cringe'][tno]['posts'][pno] = {} if info['based_cringe'][tno]['posts'][pno].nil?
       info['based_cringe'][tno]['posts'][pno]['based'] = [] if info['based_cringe'][tno]['posts'][pno]['based'].nil?
-      info['based_cringe'][tno]['posts'][pno]['based'].push(notif['account']['acct'] || notif['account']['fqn'])
+      info['based_cringe'][tno]['posts'][pno]['based'].push(acct)
       info['based_cringe'][tno]['posts'][pno]['based'].uniq!
+
+      if /#(nobot|notag)/i/.match(notif['account'].to_s)
+        info['notag'] ||= []
+        info['notag'].push(acct)
+      end
 
       thread = Thread.new(info['old_threads'].find { |thr| thr['no'].to_i == tno.to_i })
 
@@ -205,6 +272,21 @@ module FourPleroma
       post_image(info['image_url'].gsub("%%TIM%%", candidate[:post].remote_filename).gsub("%%EXT%%", candidate[:post].ext), candidate[:post], candidate[:thread])
 
       queue.reject! { |element| candidate[:post].no == element[:post].no and candidate[:thread].no == element[:thread].no }
+    end
+
+    def new_mention(notif)
+      COMMANDS.select { |regex, cmd| regex.match(notif['status']['content']) }.each do |cmd|
+        send("cmd_#{cmd[1]}".to_sym, notif)
+      end
+    end
+
+    def new_notification(notif)
+      return if notif['id'].nil?
+      info['last_notification_id'] = notif['id'].to_i if notif['id'].to_i > info['last_notification_id'].to_i
+
+      meth = "new_#{notif['type']}".to_sym
+
+      send(meth, notif) if self.respond_to?(meth)
     end
 
     def start_build_queue
@@ -297,13 +379,17 @@ module FourPleroma
         new_info = info
         new_info["threads_touched"].select { |k,v| v == Float::INFINITY }.keys.each { |k| new_info["threads_touched"][k] = Time.now.to_i * 2 }
 
-        f = File.open(filename, "w")
-        f.write(JSON.pretty_generate(new_info))
-        f.close
+        save_info(new_info)
 
         @skip_first = false
         sleep 60
       end
+    end
+
+    def save_info(new_info)
+      f = File.open(filename, "w")
+      f.write(JSON.pretty_generate(new_info))
+      f.close
     end
 
     def post_words(post)
@@ -344,10 +430,16 @@ module FourPleroma
       pno = post.no
       info['based_cringe'] = {} if info['based_cringe'].nil?
       info['based_cringe'][tno] = { 'posts' => {} } if info['based_cringe'][tno].nil?
+      info['based_cringe'][tno]['untagged'] ||= []
       info['based_cringe'][tno]['posts'][pno] = {} if info['based_cringe'][tno]['posts'][pno].nil?
+
+      info['notags'] ||= []
 
       mentions = info['based_cringe'][tno]['posts'].collect { |post_no, post| post['based'] ? post['based'] : [] }.flatten
       mentions.uniq!
+
+      mentions.reject! { |mention| info['based_cringe'][tno]['untagged'].include?(mention) }
+      mentions.reject! { |mention| info['notag'].include?(mention) }
       mentions.collect! { |mention| "@#{mention}" }
 
       begin
