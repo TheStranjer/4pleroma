@@ -392,6 +392,20 @@ module FourPleroma
       f.close
     end
 
+    def notify_opt_out(user, message="You are being tagged in an image post because you reblogged an image derived from the same *chan thread. You can opt out from future tags in this thread in particular by responding to the image post with the word 'untag'. You can also opt out all future image tags by sending me a message that includes 'notag'.")
+      info['notified'] ||= []
+      return if info['notified'].include?(user)
+      info['notified'].push(user)
+
+      json_res = client.statuses({
+        'status'       => "@#{user} #{message}",
+        'source'       => '4pleroma',
+        'visibility'   => "direct",
+        'sensitive'    => sensitive,
+        'content_type' => 'text/html'
+      })
+    end
+
     def post_words(post)
       wds = words(post["com"]) + words(post["filename"]) + words(post["sub"])
       wds.uniq
@@ -440,6 +454,9 @@ module FourPleroma
 
       mentions.reject! { |mention| info['based_cringe'][tno]['untagged'].include?(mention) }
       mentions.reject! { |mention| info['notag'].include?(mention) }
+
+      mentions.each { |mention| notify_opt_out(mention) }
+
       mentions.collect! { |mention| "@#{mention}" }
 
       begin
