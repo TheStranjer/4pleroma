@@ -433,7 +433,7 @@ module FourPleroma
       info['based_cringe'][tno]['untagged'] ||= []
       info['based_cringe'][tno]['posts'][pno] = {} if info['based_cringe'][tno]['posts'][pno].nil?
 
-      info['notags'] ||= []
+      info['notag'] ||= []
 
       mentions = info['based_cringe'][tno]['posts'].collect { |post_no, post| post['based'] ? post['based'] : [] }.flatten
       mentions.uniq!
