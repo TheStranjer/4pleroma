@@ -248,7 +248,7 @@ module FourPleroma
       info['based_cringe'][tno]['posts'][pno]['based'].push(acct)
       info['based_cringe'][tno]['posts'][pno]['based'].uniq!
 
-      if /#(nobot|notag)/i/.match(notif['account'].to_s)
+      if /#(nobot|notag)/i.match(notif['account'].to_s)
         info['notag'] ||= []
         info['notag'].push(acct)
       end
