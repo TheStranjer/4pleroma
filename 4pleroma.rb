@@ -2,6 +2,7 @@ require 'json'
 require 'net/http'
 require 'pry'
 require 'colorize'
+require 'syndesmos'
 
 class String
   def words
@@ -108,6 +109,8 @@ module FourPleroma
   class Main
     attr_accessor :info, :old_threads, :bearer_token, :instance, :filename, :skip_first, :name, :max_sleep_time, :visibility_listing, :schema, :queue_wait, :queue, :sensitive, :initial_wait
 
+    attr_accessor :client
+
     def initialize(fn, info = nil)
       @filename = fn
       @info = info || JSON.parse(File.open(filename, "r").read)
@@ -124,6 +127,12 @@ module FourPleroma
       @queue = []
       @sensitive = info['sensitive'] || false
       @initial_wait = info['initial_wait'] || queue_wait
+
+      @client = Syndesmos.new(bearer_token: bearer_token, instance: instance)
+
+      raise "Invalid credentials" unless client.valid_credentials?
+
+      @client.add_hook(:notification, self, :new_notification)
     end
 
     def start_pop_queue
@@ -145,6 +154,57 @@ module FourPleroma
         puts "WILL POP #{name.cyan}'s QUEUE AT: #{Time.at(Time.now.to_i + queue_wait).strftime("%I:%M %p").yellow} (#{queue_wait.yellow}s)"
         sleep queue_wait
       end
+    end
+
+    def new_notification(notif)
+      return if notif['id'].nil?
+      info['last_notification_id'] = notif['id'].to_i if notif['id'].to_i > info['last_notification_id'].to_i
+
+      return if notif['type'] != 'reblog'
+      status_id = notif['status']['id']
+      tno = nil
+      pno = nil
+
+      info['based_cringe'].each do |thread_no, contents|
+        next if contents['posts'].nil?
+
+        pno = contents['posts'].find { |post_no, post_contents| post_contents['pleroma_id'] == status_id }
+        pno = pno.first if pno
+
+        if pno
+          tno = thread_no
+          break
+        end
+      end
+
+      return if tno.nil?
+
+      info['based_cringe'][tno] = {} if info['based_cringe'][tno].nil?
+      info['based_cringe'][tno]['posts'] = {} if info['based_cringe'][tno]['posts'].nil?
+      info['based_cringe'][tno]['posts'][pno] = {} if info['based_cringe'][tno]['posts'][pno].nil?
+      info['based_cringe'][tno]['posts'][pno]['based'] = [] if info['based_cringe'][tno]['posts'][pno]['based'].nil?
+      info['based_cringe'][tno]['posts'][pno]['based'].push(notif['account']['acct'] || notif['account']['fqn'])
+      info['based_cringe'][tno]['posts'][pno]['based'].uniq!
+
+      thread = Thread.new(info['old_threads'].find { |thr| thr['no'].to_i == tno.to_i })
+
+      based = how_based(thread)
+      cringe = how_cringe(thread)
+      puts "REBLOG #{name.cyan} - #{tno.cyan}, Based: #{based.green}, Cringe: #{cringe.red}"
+
+      return if based < cringe
+
+      options = queue.select {|x| x[:thread].no == tno.to_s }
+
+      return if options.length == 0
+
+      options.shuffle!
+      candidate = options.pop
+
+      puts "FAST TRACKING QUEUED IMAGE FROM #{name.cyan} FOR THREAD #{thread.no.green} DUE TO USER OPT-IN"
+      post_image(info['image_url'].gsub("%%TIM%%", candidate[:post].remote_filename).gsub("%%EXT%%", candidate[:post].ext), candidate[:post], candidate[:thread])
+
+      queue.reject! { |element| candidate[:post].no == element[:post].no and candidate[:thread].no == element[:thread].no }
     end
 
     def start_build_queue
@@ -183,57 +243,6 @@ module FourPleroma
         info["old_threads"] = catalog.to_h
 
         rate_limit_exponent = 0
-
-        notifications.each do |notif|
-          next if notif['id'].nil?
-          info['last_notification_id'] = notif['id'].to_i if notif['id'].to_i > info['last_notification_id'].to_i
-
-          next if notif['type'] != 'reblog'
-          status_id = notif['status']['id']
-          tno = nil
-          pno = nil
-
-          info['based_cringe'].each do |thread_no, contents|
-            next if contents['posts'].nil?
-
-            pno = contents['posts'].find { |post_no, post_contents| post_contents['pleroma_id'] == status_id }
-            pno = pno.first if pno
-
-            if pno
-              tno = thread_no
-              break
-            end
-          end
-
-          next if tno.nil?
-
-          info['based_cringe'][tno] = {} if info['based_cringe'][tno].nil?
-          info['based_cringe'][tno]['posts'] = {} if info['based_cringe'][tno]['posts'].nil?
-          info['based_cringe'][tno]['posts'][pno] = {} if info['based_cringe'][tno]['posts'][pno].nil?
-          info['based_cringe'][tno]['posts'][pno]['based'] = [] if info['based_cringe'][tno]['posts'][pno]['based'].nil?
-          info['based_cringe'][tno]['posts'][pno]['based'].push(notif['account']['acct'] || notif['account']['fqn'])
-          info['based_cringe'][tno]['posts'][pno]['based'].uniq!
-
-          thread = Thread.new(info['old_threads'].find { |thr| thr['no'].to_i == tno.to_i })
-
-          based = how_based(thread)
-          cringe = how_cringe(thread)
-          puts "REBLOG #{name.cyan} - #{tno.cyan}, Based: #{based.green}, Cringe: #{cringe.red}"
-
-          next if based < cringe
-
-          options = queue.select {|x| x[:thread].no == tno.to_s }
-
-          next if options.length == 0
-
-          options.shuffle!
-          candidate = options.pop
-
-          puts "FAST TRACKING QUEUED IMAGE FROM #{name.cyan} FOR THREAD #{thread.no.green} DUE TO USER OPT-IN"
-          post_image(info['image_url'].gsub("%%TIM%%", candidate[:post].remote_filename).gsub("%%EXT%%", candidate[:post].ext), candidate[:post], candidate[:thread])
-
-          queue.reject! { |element| candidate[:post].no == element[:post].no and candidate[:thread].no == element[:thread].no }
-        end
 
         catalog.threads.each do |thread|
           based = how_based(thread)
@@ -313,26 +322,14 @@ module FourPleroma
 
       img = res.body
 
-      uri = URI.parse("https://#{instance}/api/v1/media")
-      header = {'Authorization': "Bearer #{bearer_token}"}
-
-      http = Net::HTTP.new(uri.host, uri.port)
-      http.use_ssl = true
-
       filename = "#{post.filename}#{post.ext}"
 
       f = File.open(filename, "w")
       f.write(img)
       f.close
 
-      req = Net::HTTP::Post.new(uri.request_uri)
-      req['Authorization'] = "Bearer #{bearer_token}"
-      req.set_form({"file" => File.open(filename)}, "multipart/form-data")
-
-      res = http.request(req)
-
       begin
-        response = JSON.parse(res.body)
+        response = client.media(filename)
       rescue JSON::ParserError
         return
       end
@@ -353,25 +350,20 @@ module FourPleroma
       mentions.uniq!
       mentions.collect! { |mention| "@#{mention}" }
 
-      req = Net::HTTP::Post.new(uri.request_uri, header)
-      req.body = {
+      begin
+        json_res = client.statuses({
         'status'       => "#{mentions.join(' ')}\n#{info['content_prepend']}#{process_html(post.body)}#{info['content_append']}".strip,
         'source'       => '4pleroma',
         'visibility'   => visibility_listing,
         'sensitive'    => sensitive,
         'content_type' => 'text/html',
         'media_ids'    => [response['id']]
-      }.to_json
-
-      res = http.request(req)
-
-      File.delete(filename)
-
-      begin
-        json_res = JSON.parse(res.body)
+      })
       rescue JSON::ParserError
         return
       end
+
+      File.delete(filename)
 
       info['based_cringe'][tno]['posts'][pno]['pleroma_id'] = json_res['id']
 
@@ -388,27 +380,6 @@ module FourPleroma
 
     def thread_numbers(threads)
       threads.collect { |x| x["no"] }
-    end
-
-    def notifications
-      begin
-        url = "https://#{instance}/api/v1/notifications?with_muted=true&limit=20"
-        url += "&since_id=#{info['last_notification_id']}" if info['last_notification_id']
-
-        uri = URI.parse(url)
-        header = {'Authorization': "Bearer #{bearer_token}"}
-
-        http = Net::HTTP.new(uri.host, uri.port)
-        http.use_ssl = true
-
-        req = Net::HTTP::Get.new(uri.request_uri, header)
-
-        res = http.request(req)
-
-        JSON.parse(res.body)
-      rescue
-        []
-      end
     end
 
     def how_based(thread)
