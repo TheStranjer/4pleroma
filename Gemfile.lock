@@ -7,10 +7,10 @@ GIT
 
 GIT
   remote: https://github.com/TheStranjer/syndesmos/
-  revision: 5302387af5cd73c1dbc1c19ab8a16567fb57603c
+  revision: 456bfaccfa704ca643b4f14f8df5a9938c71c455
   branch: akro
   specs:
-    syndesmos (0.1.1)
+    syndesmos (0.2.2)
 
 GEM
   remote: https://rubygems.org/
