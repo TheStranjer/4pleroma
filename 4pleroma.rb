@@ -8,6 +8,10 @@ class String
   def words
     self.downcase.scan(/[\w']+/)
   end
+
+  def filesystem_sanitize
+    gsub('/', '_')
+  end
 end
 
 class Array
@@ -134,6 +138,10 @@ module FourPleroma
       @sensitive = info['sensitive'] || false
       @initial_wait = info['initial_wait'] || queue_wait
 
+      @info['thread_ops'] ||= {}
+
+      @info['media_ids'] ||= {}
+
       @client = Syndesmos.new(bearer_token: bearer_token, instance: instance)
 
       raise "Invalid credentials" unless client.valid_credentials?
@@ -146,20 +154,35 @@ module FourPleroma
       sleep initial_wait
 
       while true
-        queue.shuffle!
-        candidate = queue.pop
+        regex = /^\.\/files\/\w+\/(\d+)\/(.+)$/
+        filename = Dir["./files/#{name.filesystem_sanitize}/**/*"].select { |fn| regex.match(fn) }.sample
 
-        if candidate.nil?
-          puts "WILL POP #{name.cyan}'s QUEUE AT: #{Time.at(Time.now.to_i + queue_wait).strftime("%I:%M %p").yellow} (#{queue_wait.yellow}s)"
-          sleep queue_wait
+        m = regex.match(filename)
+        candidate = queue.reject { |q| q.nil? }.find { |c|
+          c[:thread].no == m[1] and
+          c[:post].no == m[2] }
+
+        json_res = post_image(filename, candidate ? candidate[:post].body : "")
+        puts "NEW IMAGE ON #{name.cyan}: #{filename.cyan}"
+        queue.reject! { |el| el[:post].no == m[2] and el[:thread].no == m[1] }
+        
+        if json_res.nil?
+          delay_pop
           next
         end
 
-        post_image(info['image_url'].gsub("%%TIM%%", candidate[:post].remote_filename).gsub("%%EXT%%", candidate[:post].ext), candidate[:post], candidate[:thread])
+        info['based_cringe'][m[1]] ||= {}
+        info['based_cringe'][m[1]]['posts'] ||= {}
+        info['based_cringe'][m[1]]['posts'][m[2]] ||= {}
+        info['based_cringe'][m[1]]['posts'][m[2]]['pleroma_id'] = json_res['id']
 
-        puts "WILL POP #{name.cyan}'s QUEUE AT: #{Time.at(Time.now.to_i + queue_wait).strftime("%I:%M %p").yellow} (#{queue_wait.yellow}s)"
-        sleep queue_wait
+        delay_pop
       end
+    end
+
+    def delay_pop
+      puts "WILL POP #{name.cyan}'s QUEUE AT: #{Time.at(Time.now.to_i + queue_wait).strftime("%I:%M %p").yellow} (#{queue_wait.yellow}s)"
+      sleep queue_wait
     end
 
     def cmd_tag(notif)
@@ -220,6 +243,44 @@ module FourPleroma
       save_info(info)
     end
 
+    def new_favourite(notif)
+      status_id = notif['status']['id']
+      tno = nil
+      pno = nil
+
+      info['based_cringe'].each do |thread_no, contents|
+        next if contents['posts'].nil?
+
+        pno = contents['posts'].find { |post_no, post_contents| post_contents['pleroma_id'] == status_id }
+        pno = pno.first if pno
+
+        if pno
+          tno = thread_no
+          break
+        end
+      end
+
+      return if tno.nil?
+
+      acct = notif['account']['acct'] || notif['account']['fqn']
+
+      info['based_cringe'][tno] = {} if info['based_cringe'][tno].nil?
+      info['based_cringe'][tno]['posts'] = {} if info['based_cringe'][tno]['posts'].nil?
+      info['based_cringe'][tno]['posts'][pno] = {} if info['based_cringe'][tno]['posts'][pno].nil?
+      info['based_cringe'][tno]['posts'][pno]['fav'] = [] if info['based_cringe'][tno]['posts'][pno]['fav'].nil?
+      info['based_cringe'][tno]['posts'][pno]['fav'].push(acct)
+      info['based_cringe'][tno]['posts'][pno]['fav'].uniq!
+
+      if /#(nobot|notag)/i.match(notif['account'].to_s)
+        info['notag'] ||= []
+        info['notag'].push(acct)
+      end
+
+      save_info(info)
+
+      notify_opt_out(acct)
+    end
+
     def new_reblog(notif)
       status_id = notif['status']['id']
       tno = nil
@@ -253,6 +314,11 @@ module FourPleroma
         info['notag'].push(acct)
       end
 
+      save_info(info)
+
+
+      notify_opt_out(acct)
+
       thread = Thread.new(info['old_threads'].find { |thr| thr['no'].to_i == tno.to_i })
 
       based = how_based(thread)
@@ -267,9 +333,6 @@ module FourPleroma
 
       options.shuffle!
       candidate = options.pop
-
-      puts "FAST TRACKING QUEUED IMAGE FROM #{name.cyan} FOR THREAD #{thread.no.green} DUE TO USER OPT-IN"
-      post_image(info['image_url'].gsub("%%TIM%%", candidate[:post].remote_filename).gsub("%%EXT%%", candidate[:post].ext), candidate[:post], candidate[:thread])
 
       queue.reject! { |element| candidate[:post].no == element[:post].no and candidate[:thread].no == element[:thread].no }
     end
@@ -289,6 +352,10 @@ module FourPleroma
       send(meth, notif) if self.respond_to?(meth)
     end
 
+    def get_directory(tno)
+      "./files/#{name.filesystem_sanitize}/#{tno}/"
+    end
+
     def start_build_queue
       puts "4pleroma bot, watching catalog: #{info['catalog_url'].cyan}"
 
@@ -297,6 +364,8 @@ module FourPleroma
       info['based_cringe'] ||= {}
 
       while true
+        queue_start = Dir["./files/#{name.filesystem_sanitize}/**/*"].length
+
         timestamp = Time.now.to_i
 
         old_queue_posts = queue.collect { |p| p[:post].no }
@@ -314,8 +383,39 @@ module FourPleroma
 
         dtn = otn - ntn
 
+        dump_threads = dtn.select { |tno| info['based_cringe'][tno] and info['based_cringe'][tno]['posts'] and info['based_cringe'][tno]['posts'].any? { |pno, post| (post['based'] and post['based'].length > 0) or (post['fav'] and post['fav'].length > 0) } }.each do |tno|
+          mentions = info['based_cringe'][tno]['posts'].collect { |post_no, post| post['based'] ? post['based'] : [] }.flatten
+          directory = get_directory(tno)
+
+          files = Dir["#{directory}/**/*"]
+          next if files.length == 0
+
+          puts "DUMPING #{name.cyan} THREAD: #{tno.green} with #{files.length.yellow} posts and with the following mentions: #{mentions.cyan.to_unescaped_s}"
+          next if mentions.length == 0
+
+          info['based_cringe'][tno]['untagged'] ||= []
+          mentions.reject! { |mention|  info['based_cringe'][tno]['untagged'].include?(mention) }
+          mentions.reject! { |mention| info['notag'].include?(mention) }
+          mentions.collect! { |mention| "@#{mention}" }
+
+          mentions.uniq!
+
+          post_image(files, "\nThis is an image dump of #{name} thread #{tno}:\n#{info['thread_ops'][tno]}\n\n#{mentions.join(' ')}".gsub("\n\n\n", " "))
+        end
+
+        Dir["./files/#{name.filesystem_sanitize}/*"].each do |fn|
+          m = /^\.\/files\/#{name.filesystem_sanitize}\/(\d+)$/i.match(fn)
+          next if m.nil?
+          tno = m[1]
+          next if ntn.include?(tno)
+          directory = get_directory(tno)
+          FileUtils.remove_dir(directory) if File.directory?(directory)
+        end
+
         deleted_elements = queue.select { |el| dtn.include?(el[:thread].no) }
         queue.reject! { |el| dtn.include?(el[:thread].no) }
+
+        info['thread_ops'].reject! { |k| dtn.include?(k) }
 
         puts "Removed the following threads from #{name.cyan} due to expiration: #{dtn.red.to_unescaped_s}" if dtn.size > 0
 
@@ -327,18 +427,10 @@ module FourPleroma
         rate_limit_exponent = 0
 
         catalog.threads.each do |thread|
+
           based = how_based(thread)
           cringe = how_cringe(thread)
           next if cringe > based
-          candidates = queue.select { |el| el[:thread].no == thread.no }
-          el = candidates.sample
-          if based > 0 and el
-            puts "FAST TRACKING NEWLY-DISCOVERED IMAGE FOR #{name.cyan} FOR THREAD #{el[:thread].no.green} DUE TO USER OPT-IN"
-
-            post_image(info['image_url'].gsub("%%TIM%%", el[:post].remote_filename).gsub("%%EXT%%", el[:post].ext), el[:post], el[:thread])
-            queue.reject! { |element| el[:post].no == element[:post].no and el[:thread].no == element[:thread].no }
-          end
-
           next if info["threads_touched"].keys.include?(thread.no) and info["threads_touched"][thread.no] >= (thread.last_modified - info['janny_lag'])
           thread_url = info['thread_url'].gsub("%%NUMBER%%", thread.no)
           begin
@@ -346,6 +438,8 @@ module FourPleroma
           rescue JSON::ParserError
             next
           end
+
+          info['thread_ops'][thread.no] = thread.posts.first.body if thread.posts
 
           thread_words = thread.words.uniq
           thread_badwords = thread_words.select { |tw| info["badwords"].any? { |bw| bw == tw } || info["badregex"].any? { |br| %r{#{br}}i.match(tw) } }
@@ -357,10 +451,25 @@ module FourPleroma
           end
           
           thread.posts.select { |p| p.posted_at >= info["threads_touched"][thread.no].to_i and p.remote_filename.length > 0 }.each do |p|
-            queue.push({
-              :post => p,
-              :thread => thread
-            })
+            begin
+              directory = get_directory(thread.no)
+              FileUtils.mkdir_p(directory)
+              filename = "#{directory}#{p.filename}#{p.ext}"
+
+              url = info['image_url'].gsub("%%TIM%%", p.remote_filename).gsub("%%EXT%%", p.ext)
+              img = Net::HTTP.get_response(URI(url)).body
+              f = File.open(filename, "w")
+              f.write(img)
+              f.close
+
+              queue.push({
+                :post => p,
+                :thread => thread,
+                :filename => filename
+              })
+            rescue => e
+              puts "Could not save file, yielding error of type #{e.class.red} with message #{e.message.red}"
+            end
           end
 
           info["threads_touched"][thread.no] = timestamp.to_i
@@ -368,20 +477,23 @@ module FourPleroma
 
         new_queue_posts = queue.collect { |p| p[:post].no }
 
-        messages = []
-        new_post_count = (new_queue_posts - old_queue_posts).length
-        removed_post_count = (old_queue_posts - new_queue_posts).length
-        messages.push("ADDED #{new_post_count.green} TO") if new_post_count > 0
-        messages.push("REMOVED #{removed_post_count.red} FROM") if removed_post_count > 0
-
-        puts "#{messages.join(' AND ')} THE #{name.cyan} QUEUE, BRINGING THE TOTAL TO #{queue.length.send(removed_post_count > new_post_count ? :red : (new_post_count > removed_post_count ? :green : :cyan))}" if messages.length > 0
-
         new_info = info
         new_info["threads_touched"].select { |k,v| v == Float::INFINITY }.keys.each { |k| new_info["threads_touched"][k] = Time.now.to_i * 2 }
 
         save_info(new_info)
 
         @skip_first = false
+
+        queue_end = Dir["./files/#{name.filesystem_sanitize}/**/*"].length
+
+        if queue_end > queue_start
+          puts "ADDED #{(queue_end - queue_start).green} NEW IMAGES TO #{name.cyan}, BRINGING THE TOTAL TO #{queue_end.green}"
+        elsif queue_end < queue_start
+          puts "REMOVED #{(queue_start - queue_end).red} OLD IMAGES TO #{name.cyan}, BRINGING THE TOTAL TO #{queue_end.red}"
+        end
+
+        info['media_ids'].select! { |fn, id| Dir["./files/**/*"].include?(fn) }
+
         sleep 60
       end
     end
@@ -392,9 +504,10 @@ module FourPleroma
       f.close
     end
 
-    def notify_opt_out(user, message="You are being tagged in an image post because you reblogged an image derived from the same *chan thread. You can opt out from future tags in this thread in particular by responding to the image post with the word 'untag'. You can also opt out all future image tags by sending me a message that includes 'notag'.")
+    def notify_opt_out(user, message="You reblogged or favorited a post I made. That post came from a thread on #{name}. When the thread dies, all of the images collected from it will be uploaded in a big dump post. You will, by default, be tagged in that dump. If you don't want to be tagged in that dump, reply to the image post including the word 'untag', and if you don't want to ever be tagged in posts by me respond with 'notag' instead.")
       info['notified'] ||= []
-      return if info['notified'].include?(user)
+      info['notag'] ||= []
+      return if info['notified'].include?(user) or info['notag'].include?(user)
       info['notified'].push(user)
 
       json_res = client.statuses({
@@ -411,25 +524,11 @@ module FourPleroma
       wds.uniq
     end
 
-    def post_image(url, post, thread)
+    def post_image(filename, message="")
       return if @skip_first
-      res = Net::HTTP.get_response(URI(url))
-
-      if res.code != '200'
-        puts "ERROR'D OUT ON #{name.red} - #{thread.no.red} - #{post.no.red}"
-        return
-      end
-
-      img = res.body
-
-      filename = "#{post.filename}#{post.ext}"
-
-      f = File.open(filename, "w")
-      f.write(img)
-      f.close
-
+      filename = (filename.class == Array ? filename : [filename])
       begin
-        response = client.media(filename)
+        media_ids = filename.collect { |fn| info['media_ids'][fn] ||= client.media(fn)['id'] }
       rescue JSON::ParserError
         return
       end
@@ -440,45 +539,18 @@ module FourPleroma
         'Content-Type' => 'application/json'
       }
 
-      tno = thread.no
-      pno = post.no
-      info['based_cringe'] = {} if info['based_cringe'].nil?
-      info['based_cringe'][tno] = { 'posts' => {} } if info['based_cringe'][tno].nil?
-      info['based_cringe'][tno]['untagged'] ||= []
-      info['based_cringe'][tno]['posts'][pno] = {} if info['based_cringe'][tno]['posts'][pno].nil?
-
-      info['notag'] ||= []
-
-      mentions = info['based_cringe'][tno]['posts'].collect { |post_no, post| post['based'] ? post['based'] : [] }.flatten
-      mentions.uniq!
-
-      mentions.reject! { |mention| info['based_cringe'][tno]['untagged'].include?(mention) }
-      mentions.reject! { |mention| info['notag'].include?(mention) }
-
-      mentions.each { |mention| notify_opt_out(mention) }
-
-      mentions.collect! { |mention| "@#{mention}" }
-
       begin
-        json_res = client.statuses({
-        'status'       => "#{mentions.join(' ')}\n#{info['content_prepend']}#{process_html(post.body)}#{info['content_append']}".strip,
-        'source'       => '4pleroma',
-        'visibility'   => visibility_listing,
-        'sensitive'    => sensitive,
-        'content_type' => 'text/html',
-        'media_ids'    => [response['id']]
-      })
+        client.statuses({
+          'status'       => "#{info['content_prepend']}#{process_html(message)}#{info['content_append']}".strip,
+          'source'       => '4pleroma',
+          'visibility'   => visibility_listing,
+          'sensitive'    => sensitive,
+          'content_type' => 'text/html',
+          'media_ids'    => media_ids
+        })
       rescue JSON::ParserError
-        return
+        nil
       end
-
-      File.delete(filename)
-
-      info['based_cringe'][tno]['posts'][pno]['pleroma_id'] = json_res['id']
-
-      queue.reject! { |el| el[:post].no == post.no and el[:thread].no == thread.no }
-
-      puts "NEW IMAGE ON #{name.cyan} - #{tno.cyan}: #{filename.cyan}, with based rating now at #{how_based(thread).green} and cringe rating now at #{how_cringe(thread).red}"
     end
 
     def process_html(html)
