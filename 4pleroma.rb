@@ -114,7 +114,7 @@ module FourPleroma
     COMMANDS = {
       /untag/i => "untag",
       /notag/i => "notag",
-      /tag/i   => "tag"
+      /[^o]tag/i   => "tag"
     }
 
     attr_accessor :info, :old_threads, :bearer_token, :instance, :filename, :skip_first, :name, :max_sleep_time, :visibility_listing, :schema, :queue_wait, :queue, :sensitive, :initial_wait
