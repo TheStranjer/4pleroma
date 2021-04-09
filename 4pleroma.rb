@@ -180,10 +180,14 @@ module FourPleroma
     end
 
     def delay_pop
-      popping_time = Time.at(Time.now.to_i + queue_wait).strftime("%I:%M %p %Z")
-      client.update_credentials({"fields_attributes": [ { "name": "Bot Author", "value": "@NEETzsche@iddqd.social" }, {"name": "Next Post", "value": popping_time} ]})
-      puts "WILL POP #{name.cyan}'s QUEUE AT: #{popping_time.yellow} (#{queue_wait.yellow}s)"
-      sleep queue_wait
+      begin
+        popping_time = Time.at(Time.now.to_i + queue_wait).strftime("%I:%M %p %Z")
+        client.update_credentials({"fields_attributes": [ { "name": "Bot Author", "value": "@NEETzsche@iddqd.social" }, {"name": "Next Post", "value": popping_time} ]})
+        puts "WILL POP #{name.cyan}'s QUEUE AT: #{popping_time.yellow} (#{queue_wait.yellow}s)"
+        sleep queue_wait
+      rescue
+        nil
+      end
     end
 
     def cmd_tag(notif)
@@ -529,7 +533,9 @@ module FourPleroma
       return if @skip_first
       filename = (filename.class == Array ? filename : [filename])
       begin
-        media_ids = filename.collect { |fn| info['media_ids'][fn] ||= client.media(fn)['id'] }
+        new_media_ideas = {}
+        media_ids = filename.collect { |fn| new_media_ideas[fn] = info['media_ids'][fn] || client.media(fn)['id'] }
+        info['media_ids'].merge(new_media_ideas)
       rescue JSON::ParserError
         return
       end
@@ -549,7 +555,7 @@ module FourPleroma
           'content_type' => 'text/html',
           'media_ids'    => media_ids
         })
-      rescue JSON::ParserError
+      rescue
         nil
       end
     end
