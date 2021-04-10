@@ -117,7 +117,7 @@ module FourPleroma
       /[^o]tag/i   => "tag"
     }
 
-    attr_accessor :info, :old_threads, :bearer_token, :instance, :filename, :skip_first, :name, :max_sleep_time, :visibility_listing, :schema, :queue_wait, :queue, :sensitive, :initial_wait
+    attr_accessor :info, :old_threads, :bearer_token, :instance, :filename, :skip_first, :name, :max_sleep_time, :visibility_listing, :schema, :queue, :sensitive
 
     attr_accessor :client
 
@@ -133,10 +133,8 @@ module FourPleroma
       @max_sleep_time = info['max_sleep_time'] || 3600
       @visibility_listing = info['visibility_listing'] || 'public'
       @schema = info['schema'] || '4chan'
-      @queue_wait = info['queue_wait'] || 600
       @queue = []
       @sensitive = info['sensitive'] || false
-      @initial_wait = info['initial_wait'] || queue_wait
 
       @info['thread_ops'] ||= {}
 
@@ -181,6 +179,7 @@ module FourPleroma
 
     def delay_pop
       begin
+        queue_wait = calc_wait
         popping_time = Time.at(Time.now.to_i + queue_wait).strftime("%I:%M %p %Z")
         client.update_credentials({"fields_attributes": [ { "name": "Bot Author", "value": "@NEETzsche@iddqd.social" }, {"name": "Next Post", "value": popping_time} ]})
         puts "WILL POP #{name.cyan}'s QUEUE AT: #{popping_time.yellow} (#{queue_wait.yellow}s)"
@@ -188,6 +187,10 @@ module FourPleroma
       rescue
         nil
       end
+    end
+
+    def calc_wait
+      info['queue_wait'] / (1+info['based_cringe'].sum { |tno, t| t['posts'].sum { |pno, p| (p['based'] ? p['based'].length : 0) + (p['fav'] ? p['fav'].length : 0) * 0.5 } })
     end
 
     def cmd_tag(notif)
