@@ -117,7 +117,7 @@ module FourPleroma
       /[^o]tag/i   => "tag"
     }
 
-    attr_accessor :info, :old_threads, :bearer_token, :instance, :filename, :skip_first, :name, :max_sleep_time, :visibility_listing, :schema, :queue, :sensitive
+    attr_accessor :info, :old_threads, :bearer_token, :instance, :filename, :skip_first, :name, :max_sleep_time, :visibility_listing, :schema, :queue, :sensitive, :oldest_post_time, :carried_over_dumps
 
     attr_accessor :client
 
@@ -145,6 +145,9 @@ module FourPleroma
       raise "Invalid credentials" unless client.valid_credentials?
 
       @client.add_hook(:notification, self, :new_notification)
+
+      @oldest_post_time = Time.now.to_i
+      @carried_over_dumps = 0
     end
 
     def start_pop_queue
@@ -190,7 +193,13 @@ module FourPleroma
     end
 
     def calc_wait
-      info['queue_wait'] / (1+info['based_cringe'].sum { |tno, t| t['posts'].sum { |pno, p| (p['based'] ? p['based'].length : 0) + (p['fav'] ? p['fav'].length : 0) * 0.5 } })
+      ret = info['queue_wait']
+      ret /= 1+info['based_cringe'].sum { |tno, t| t['posts'].sum { |pno, p| (p['based'] ? p['based'].length : 0) + (p['fav'] ? p['fav'].length : 0) * 0.5 } } + @carried_over_dumps
+      ret *= (Time.now.to_f - oldest_post_time) / info['queue_wait']
+
+      @carried_over_dumps = 0
+
+      ret
     end
 
     def cmd_tag(notif)
@@ -384,6 +393,8 @@ module FourPleroma
           next
         end
         
+        @oldest_post_time = catalog.last['threads'].last['time']
+
         catalog = Catalog.new(catalog, schema)
 
         otn = info['old_threads'].collect { |thr| thr['no'] }
@@ -392,6 +403,8 @@ module FourPleroma
         dtn = otn - ntn
 
         dump_threads = dtn.select { |tno| info['based_cringe'][tno] and info['based_cringe'][tno]['posts'] and info['based_cringe'][tno]['posts'].any? { |pno, post| (post['based'] and post['based'].length > 0) or (post['fav'] and post['fav'].length > 0) } }.each do |tno|
+          @carried_over_dumps += info['based_cringe'][tno]['posts'].select { |post_no, post| post['based'] || post['fav'] }.length
+
           mentions = info['based_cringe'][tno]['posts'].collect { |post_no, post| post['based'] ? post['based'] : [] }.flatten
           directory = get_directory(tno)
 
