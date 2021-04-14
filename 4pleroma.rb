@@ -146,8 +146,9 @@ module FourPleroma
 
       @client.add_hook(:notification, self, :new_notification)
 
-      @oldest_post_time = Time.now.to_i
+      @oldest_post_time = 0
       @carried_over_dumps = 0
+      @no_reacts = 1.00
     end
 
     def start_pop_queue
@@ -166,6 +167,8 @@ module FourPleroma
         puts "NEW IMAGE ON #{name.cyan}: #{filename.cyan}"
         queue.reject! { |el| el[:post].no == m[2] and el[:thread].no == m[1] }
         
+        @no_reacts += 0.25
+
         if json_res.nil?
           delay_pop
           next
@@ -195,7 +198,8 @@ module FourPleroma
     def calc_wait
       ret = info['queue_wait']
       ret /= 1+info['based_cringe'].sum { |tno, t| t['posts'].sum { |pno, p| (p['based'] ? p['based'].length : 0) + (p['fav'] ? p['fav'].length : 0) * 0.5 } } + @carried_over_dumps
-      ret *= (Time.now.to_f - oldest_post_time) / info['queue_wait']
+      ret *= (Time.now.to_f - oldest_post_time) / info['queue_wait'] if oldest_post_time > 0
+      ret *= @no_reacts
 
       @carried_over_dumps = 0
 
@@ -277,7 +281,10 @@ module FourPleroma
         end
       end
 
-      return if tno.nil?
+      if tno.nil?
+        @carried_over_dumps += 3 # liking a dump means wanting more posts in general
+        return
+      end
 
       acct = notif['account']['acct'] || notif['account']['fqn']
 
@@ -315,7 +322,10 @@ module FourPleroma
         end
       end
 
-      return if tno.nil?
+      if tno.nil?
+        @carried_over_dumps += 5 # Repeating a dump means a greater desire in general for more dumps
+        return
+      end
 
       acct = notif['account']['acct'] || notif['account']['fqn']
 
@@ -355,9 +365,12 @@ module FourPleroma
     end
 
     def new_mention(notif)
-      COMMANDS.select { |regex, cmd| regex.match(notif['status']['content']) }.each do |cmd|
+      cmds = COMMANDS.select { |regex, cmd| regex.match(notif['status']['content']) }
+      cmds.each do |cmd|
         send("cmd_#{cmd[1]}".to_sym, notif)
       end
+
+      @carried_over_dumps += 2 if cmds.length == 0 # getting involved in a conversation from a dump, or just in general, indicates wanting more posts
     end
 
     def new_notification(notif)
@@ -367,6 +380,8 @@ module FourPleroma
       meth = "new_#{notif['type']}".to_sym
 
       send(meth, notif) if self.respond_to?(meth)
+
+      @no_reacts = 1
     end
 
     def get_directory(tno)
