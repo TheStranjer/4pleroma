@@ -21,6 +21,13 @@ class Array
 end
 
 module FourPleroma
+  SECONDS_PER_DAY = 86400
+  TIME_FORMAT_RANGES = {
+    (..SECONDS_PER_DAY)                      => "%I:%M %p %Z",
+    ((SECONDS_PER_DAY)..(SECONDS_PER_DAY*7)) => "%A, %I:%M %p %Z",
+    ((SECONDS_PER_DAY*7)..)                  => "%A, %B %-d, %Y %I:%M %p %Z"
+  }
+
   class Catalog
     attr_accessor :threads, :schema
 
@@ -167,7 +174,7 @@ module FourPleroma
         puts "NEW IMAGE ON #{name.cyan}: #{filename.cyan}"
         queue.reject! { |el| el[:post].no == m[2] and el[:thread].no == m[1] }
         
-        info['no_reacts'] += 0.25
+        info['no_reacts'] += 1.00
 
         if json_res.nil?
           delay_pop
@@ -186,13 +193,20 @@ module FourPleroma
     def delay_pop
       begin
         queue_wait = calc_wait
-        popping_time = Time.at(Time.now.to_i + queue_wait).strftime("%I:%M %p %Z")
+        info['next_post'] = Time.now.to_i + queue_wait
+        popping_time = Time.at(info['next_post']).strftime(time_format)
         client.update_credentials({"fields_attributes": [ { "name": "Bot Author", "value": "@NEETzsche@iddqd.social" }, {"name": "Next Post", "value": popping_time} ]})
         puts "WILL POP #{name.cyan}'s QUEUE AT: #{popping_time.yellow} (#{queue_wait.yellow}s)"
         sleep queue_wait
       rescue
         nil
       end
+    end
+
+    def time_format
+      diff = info['next_post'] - Time.now.to_i
+
+      FourPleroma::TIME_FORMAT_RANGES.find{ |k, v| k.cover?(diff) }.last
     end
 
     def calc_wait
@@ -408,7 +422,7 @@ module FourPleroma
           next
         end
         
-        @oldest_post_time = catalog.last['threads'].last['time']
+        @oldest_post_time = catalog.last['threads'].last['last_modified']
 
         catalog = Catalog.new(catalog, schema)
 
