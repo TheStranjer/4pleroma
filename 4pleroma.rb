@@ -227,12 +227,11 @@ module FourPleroma
       opt  = oldest_post_time.values.length > 0 ? oldest_post_time.values.min : 0
       ret  = info['queue_wait']
       ret  /= 1+info['based_cringe'].sum { |i, board| board.sum { |tno, t| t['posts'].sum { |pno, p| (p['based'] ? p['based'].length : 0) + (p['fav'] ? p['fav'].length : 0) * 0.5 } } } + info['carried_over_dumps']
-      ret **= (1.0/info['targets'].length)
+      ret  *= (info['no_reacts'].to_f/client.verify_credentials['followers_count'].to_f)
       ret  *= (Time.now.to_f - opt) / info['queue_wait'] if opt > 0
-      ret  *= client.verify_credentials['followers_count']
       ret  *= info['no_reacts']
 
-      info['carried_over_dumps'] -= 1
+      info['carried_over_dumps'] -= 1 if info['carried_over_dumps'] > 0
 
       ret
     end
