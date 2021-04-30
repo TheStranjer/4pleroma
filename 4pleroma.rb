@@ -119,7 +119,6 @@ module FourPleroma
 
   class Main
     COMMANDS = {
-      /untag/i => "untag",
       /notag/i => "notag",
       /[^o]tag/i   => "tag"
     }
@@ -260,35 +259,6 @@ module FourPleroma
 
       client.statuses({
         "status"         => "@#{acct} You won't be tagged by this bot in the future",
-        "visibility"     => "direct",
-        "in_reply_to_id" => notif['status']['id']
-      })
-
-      save_info(info)
-    end
-
-    def cmd_untag(notif)
-      reply_to_id = notif['status']['in_reply_to_id']
-      acct = notif['account']['acct'] || notif['acct']['fqn']
-
-      if reply_to_id.nil?
-        client.statuses({
-          "status"         => "@#{acct} I can't untag you from a thread unless you respond to the image post from that thread",
-          "visibility"     => "direct",
-          "in_reply_to_id" => notif['status']['id']
-        })
-
-        return
-      end
-
-      tno = info['based_cringe'].keys.find { |tno| info['based_cringe'][tno]['posts'].any? { |pno, post| post['pleroma_id'] == reply_to_id } }
-      info['based_cringe'][tno] ||= {}
-      info['based_cringe'][tno]['untagged'] ||= []
-      info['based_cringe'][tno]['untagged'].push(acct)
-      info['based_cringe'][tno]['untagged'].uniq!
-
-      client.statuses({
-        "status"         => "@#{acct} You've been untagged from this thread and should not receive any more tags about it",
         "visibility"     => "direct",
         "in_reply_to_id" => notif['status']['id']
       })
@@ -591,7 +561,7 @@ module FourPleroma
       f.close
     end
 
-    def notify_opt_out(user, message="You reblogged or favorited a post I made. That post came from a thread on #{name}. When the thread dies, all of the images collected from it will be uploaded in a big dump post. You will, by default, be tagged in that dump. If you don't want to be tagged in that dump, reply to the image post including the word 'untag', and if you don't want to ever be tagged in posts by me respond with 'notag' instead.")
+    def notify_opt_out(user, message="You reblogged or favorited a post I made. That post came from a thread on #{name}. When the thread dies, all of the images collected from it will be uploaded in a big dump post. You will, by default, be tagged in that dump. If you don't want to ever be tagged in posts by me respond with 'notag' instead.")
       info['notified'] ||= []
       info['notag'] ||= []
       return if info['notified'].include?(user) or info['notag'].include?(user)
