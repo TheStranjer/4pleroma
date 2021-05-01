@@ -405,6 +405,8 @@ module FourPleroma
       meth = "new_#{notif['type'].split(':').last}".to_sym
 
       send(meth, notif) if self.respond_to?(meth)
+
+      delay_pop
     end
 
     def get_directory(target, tno)
