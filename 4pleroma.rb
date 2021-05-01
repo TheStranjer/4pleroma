@@ -165,17 +165,21 @@ module FourPleroma
     end
 
     def start_pop_queue
-      delay_pop
+      delay_pop if info['next_post'].nil?
 
       while true
+        time_wait = info['next_post'] - Time.now.to_i
+        if time_wait > 1
+          sleep 1
+          next
+        end
+
         regex = /^\.\/files\/(\w+)\/(\d+)\/(.+)$/
         filename = info['targets'].collect { |t| t['directory'] }.collect { |t| Dir["./files/#{t.filesystem_sanitize}/**/*"].select { |fn| regex.match(fn) and media_ids_mutex.synchronize { !info['media_ids'].include?(fn) } } }.flatten.sample
 
         m = regex.match(filename)
-        if m.nil?
-          delay_pop
-          next
-        end
+        next if m.nil?
+
         candidate = queue.reject { |q| q.nil? }.find { |c|
           c[:thread].no == m[2] and
           c[:post].no == m[3] }
@@ -184,12 +188,9 @@ module FourPleroma
         puts "NEW IMAGE ON #{name.cyan}: #{filename.green}"
         queue.reject! { |el| el[:post].no == m[3] and el[:thread].no == m[2] }
         
-        info['no_reacts'] += 1.00
+        next if json_res.nil?
 
-        if json_res.nil?
-          delay_pop
-          next
-        end
+        info['no_reacts'] += 1.00
 
         info['based_cringe'][m[1]] ||= {}
         info['based_cringe'][m[1]][m[2]] ||= {}
@@ -208,7 +209,8 @@ module FourPleroma
         popping_time = Time.at(info['next_post']).strftime(time_format)
         client.update_credentials({"fields_attributes": [ { "name": "Bot Author", "value": "@NEETzsche@iddqd.social" }, {"name": "Next Post", "value": popping_time}, {"name": "Posts Since React", "value": info['no_reacts'].to_i.to_s} ]})
         puts "WILL POP #{name.cyan}'s QUEUE AT: #{popping_time.yellow} (#{queue_wait.yellow}s) (number of posts without reacts: #{info['no_reacts'].to_i.red})"
-        sleep queue_wait
+
+        save_info info
       rescue => e
         puts "FAILED TO DELAY POP FOR ERROR TYPE #{e.class.red} WITH MESSAGE #{e.message.red}"
         sleep 3600
@@ -222,8 +224,6 @@ module FourPleroma
     end
 
     def calc_wait
-      return info['next_post'] - Time.now.to_f if info['next_post'] > Time.now.to_i
-
       opt  = oldest_post_time.values.length > 0 ? oldest_post_time.values.min : 0
       ret  = info['queue_wait']
       ret  /= 1+info['based_cringe'].sum { |i, board| board.sum { |tno, t| t['posts'].sum { |pno, p| (p['based'] ? p['based'].length : 0) + (p['fav'] ? p['fav'].length : 0) * 0.5 } } } + info['carried_over_dumps']
@@ -266,6 +266,9 @@ module FourPleroma
     end
 
     def new_favourite(notif)
+      info['no_reacts'] = 0
+      delay_pop
+
       status_id = notif['status']['id']
       tno = nil
       pno = nil
@@ -365,7 +368,7 @@ module FourPleroma
       return if next_candidate.nil?
       thread = Thread.new(next_candidate)
 
-      puts "REBLOG #{name.cyan} - #{bnm.cyan} - #{tno.cyan}"
+      delay_pop
 
       options = queue.select {|x| x[:thread].no == tno.to_s }
 
@@ -388,13 +391,14 @@ module FourPleroma
 
     def new_notification(notif)
       return if notif['id'].nil?
+
+      info['no_reacts'] = 0
+
       info['last_notification_id'] = notif['id'].to_i if notif['id'].to_i > info['last_notification_id'].to_i
 
       meth = "new_#{notif['type']}".to_sym
 
       send(meth, notif) if self.respond_to?(meth)
-
-      info['no_reacts'] = 1
     end
 
     def get_directory(target, tno)
