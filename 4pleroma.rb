@@ -389,6 +389,10 @@ module FourPleroma
       info['carried_over_dumps'] += 2 if cmds.length == 0 # getting involved in a conversation from a dump, or just in general, indicates wanting more posts
     end
 
+    def new_emoji_reaction(notif)
+      new_favourite(notif)
+    end
+
     def new_notification(notif)
       return if notif['id'].nil?
 
@@ -398,7 +402,7 @@ module FourPleroma
 
       puts "New #{notif['type'].cyan} from #{notif['account']['fqn'].cyan} on #{name.cyan}"
 
-      meth = "new_#{notif['type']}".to_sym
+      meth = "new_#{notif['type'].split(':').last}".to_sym
 
       send(meth, notif) if self.respond_to?(meth)
     end
@@ -566,7 +570,7 @@ module FourPleroma
       f.close
     end
 
-    def notify_opt_out(user, message="You reblogged or favorited a post I made. That post came from a thread on #{name}. When the thread dies, all of the images collected from it will be uploaded in a big dump post. You will, by default, be tagged in that dump. If you don't want to ever be tagged in posts by me respond with 'notag' instead.")
+    def notify_opt_out(user, message="You reblogged, favorited, or emoji reacted a post I made. That post came from a thread on #{name}. When the thread dies, all of the images collected from it will be uploaded in a big dump post. You will, by default, be tagged in that dump. If you don't want to ever be tagged in posts by me respond with 'notag' instead.")
       info['notified'] ||= []
       info['notag'] ||= []
       return if info['notified'].include?(user) or info['notag'].include?(user)
@@ -589,9 +593,9 @@ module FourPleroma
     def post_image(filename, message="")
       filename = (filename.class == Array ? filename : [filename])
       media_ids = []
+      new_media_ideas = {}
       begin
         media_ids_mutex.synchronize do
-          new_media_ideas = {}
           media_ids = filename.collect { |fn| new_media_ideas[fn] = info['media_ids'][fn] || client.media(fn)['id'] }
 
           info['media_ids'].merge!(new_media_ideas)
