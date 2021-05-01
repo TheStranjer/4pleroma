@@ -396,6 +396,8 @@ module FourPleroma
 
       info['last_notification_id'] = notif['id'].to_i if notif['id'].to_i > info['last_notification_id'].to_i
 
+      puts "New #{notif['type'].cyan} from #{notif['account']['fqn'].cyan} on #{name.cyan}"
+
       meth = "new_#{notif['type']}".to_sym
 
       send(meth, notif) if self.respond_to?(meth)
