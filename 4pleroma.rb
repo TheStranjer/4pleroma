@@ -463,8 +463,6 @@ module FourPleroma
         files = Dir["#{directory}/**/*"]
         next if files.length == 0
 
-        puts "DUMPING #{name.cyan} (#{target['directory'].cyan}) THREAD: #{tno.green} with #{files.length.yellow} posts and with the following mentions: #{mentions.cyan.to_unescaped_s}"
-        next if mentions.length == 0
 
         info['based_cringe'][target['directory']][tno]['untagged'] ||= []
         mentions.reject! { |mention|  info['based_cringe'][target['directory']][tno]['untagged'].include?(mention) }
@@ -472,6 +470,9 @@ module FourPleroma
         mentions.collect! { |mention| "@#{mention}" }
 
         mentions.uniq!
+
+        puts "DUMPING #{name.cyan} (#{target['directory'].cyan}) THREAD: #{tno.green} with #{files.length.yellow} posts and with the following mentions: #{mentions.cyan.to_unescaped_s}"
+        next if mentions.length == 0
 
         post_image(files, "\n#{name} (#{target['directory']}) #{tno} image dump:\n#{info['thread_ops'][target['directory']][tno]}\n\n#{mentions.join(' ')}".gsub("\n\n\n", " "))
       end
