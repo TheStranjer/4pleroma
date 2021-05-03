@@ -226,10 +226,9 @@ module FourPleroma
     def calc_wait
       opt  = oldest_post_time.values.length > 0 ? oldest_post_time.values.min : 0
       ret  = info['queue_wait']
-      ret  /= 1+info['based_cringe'].sum { |i, board| board.sum { |tno, t| t['posts'].sum { |pno, p| (p['based'] ? p['based'].length : 0) + (p['fav'] ? p['fav'].length : 0) * 0.5 } } } + info['carried_over_dumps']
-      ret  *= (info['no_reacts'].to_f/client.verify_credentials['followers_count'].to_f)
-      ret  *= (Time.now.to_f - opt) / info['queue_wait'] if opt > 0
-      ret  *= info['no_reacts']
+      ret /= 1+info['based_cringe'].sum { |i, board| board.sum { |tno, t| t['posts'].sum { |pno, p| (p['based'] ? p['based'].length : 0) + (p['fav'] ? p['fav'].length : 0) * 0.5 } } } + info['carried_over_dumps']
+      ret *= info['no_reacts'].to_f
+      ret *= (Time.now.to_f - opt) / info['queue_wait'] if opt > 0
 
       info['carried_over_dumps'] -= 1 if info['carried_over_dumps'] > 0
 
@@ -267,7 +266,6 @@ module FourPleroma
 
     def new_favourite(notif)
       info['no_reacts'] = 0
-      delay_pop
 
       status_id = notif['status']['id']
       tno = nil
@@ -367,8 +365,6 @@ module FourPleroma
       next_candidate = info['old_threads'][bnm].find { |thr| thr['no'].to_i == tno.to_i }
       return if next_candidate.nil?
       thread = Thread.new(next_candidate)
-
-      delay_pop
 
       options = queue.select {|x| x[:thread].no == tno.to_s }
 
