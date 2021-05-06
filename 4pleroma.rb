@@ -147,6 +147,8 @@ module FourPleroma
 
       @client = Syndesmos.new(bearer_token: bearer_token, instance: instance)
 
+      @user = client.verify_credentials
+
       raise "Invalid credentials for #{name}" unless client.valid_credentials?
 
       @client.add_hook(:notification, self, :new_notification)
@@ -184,7 +186,12 @@ module FourPleroma
           c[:thread].no == m[2] and
           c[:post].no == m[3] }
 
-        json_res = post_image(filename, candidate ? candidate[:post].body : "")
+
+        info['force_mentions'] ||= []
+
+        json_res = post_image(filename, info['force_mentions'].uniq.reject { |x| info['notag'].include?(x) }.collect{ |x| "@#{x}" }.join(" "))
+
+        info['force_mentions'] = []
         puts "NEW IMAGE ON #{name.cyan}: #{filename.green}"
         queue.reject! { |el| el[:post].no == m[3] and el[:thread].no == m[2] }
         
@@ -382,7 +389,19 @@ module FourPleroma
         send("cmd_#{cmd[1]}".to_sym, notif)
       end
 
-      info['carried_over_dumps'] += 2 if cmds.length == 0 # getting involved in a conversation from a dump, or just in general, indicates wanting more posts
+      return if cmds.length > 0
+
+      acct = notif['account']['acct'] || notif['account']['fqn']
+      info['force_mentions'] ||= []
+      info['force_mentions'].push(acct)
+
+      notif['status']['mentions'].each do |mention|
+        info['force_mentions'].push(mention['acct']) unless mention['acct'] == @user['acct'] or mention['acct'] == @user['fqn']
+      end
+
+      notify_opt_out(acct, "You mentioned me, presumably to be in the next main image dealing, and so will be tagged in the next post. If you want to opt out of this, message me with a body that contains 'notag'.")
+
+      info['carried_over_dumps'] += 2
     end
 
     def new_emoji_reaction(notif)
@@ -505,7 +524,7 @@ module FourPleroma
         thread_url = target['thread_url'].gsub("%%NUMBER%%", thread.no)
         begin
           thread.posts = JSON.parse(Net::HTTP.get(URI(thread_url)))["posts"].collect { |p| Post.new(p, schema) }
-        rescue JSON::ParserError
+	rescue
           next
         end
 
