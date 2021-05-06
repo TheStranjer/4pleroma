@@ -415,7 +415,9 @@ module FourPleroma
 
       info['last_notification_id'] = notif['id'].to_i if notif['id'].to_i > info['last_notification_id'].to_i
 
-      puts "New #{notif['type'].cyan} from #{notif['account']['fqn'].cyan} on #{name.cyan}"
+      acct = notif['account']['acct'] || notif['account']['fqn']
+
+      puts "New #{notif['type'].cyan} from #{acct.cyan} on #{name.cyan}"
 
       meth = "new_#{notif['type'].split(':').last}".to_sym
 
