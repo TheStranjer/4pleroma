@@ -4,5 +4,6 @@ temp
 *.png
 *.gif
 *.jpeg
-
+nohup.out
+*.sh
 files/
