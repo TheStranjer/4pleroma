@@ -123,7 +123,7 @@ module FourPleroma
       /[^o]tag/i   => "tag"
     }
 
-    attr_accessor :info, :bearer_token, :instance, :filename, :skip_first, :name, :max_sleep_time, :visibility_listing, :schema, :queue, :sensitive, :oldest_post_time, :carried_over_dumps, :media_ids_mutex
+    attr_accessor :info, :bearer_token, :instance, :filename, :skip_first, :name, :max_sleep_time, :visibility_listing, :schema, :queue, :sensitive, :oldest_post_time, :carried_over_dumps, :media_ids_mutex, :building_queue_mutex
 
     attr_accessor :client
 
@@ -151,8 +151,6 @@ module FourPleroma
 
       raise "Invalid credentials for #{name}" unless client.valid_credentials?
 
-      @client.add_hook(:notification, self, :new_notification)
-
       @oldest_post_time = {}
       info['carried_over_dumps'] ||= 0
       info['no_reacts'] ||= 1.00
@@ -162,51 +160,88 @@ module FourPleroma
       info['threads_touched'] = {} if ENV['FORCE_CLEAR']
 
       @media_ids_mutex = Mutex.new
+      @building_queue_mutex = Mutex.new
 
       save_info info
+    end
+
+    def notifications
+      #begin
+	args = { "with_muted" => true, "limit" => 20 }
+	args.merge!({'since_id' => info['last_notification_id']}) if info['last_notification_id']
+        notifs = client.notifications(args)
+	notif_ids = notifs.collect { |notif| notif['id'].to_i }
+	info['last_notification_id'] = notif_ids.max.to_i > info['last_notification_id'].to_i ? notif_ids.max.to_i : info['last_notification_id']
+
+	notifs
+      #rescue
+      #  []
+      #end
     end
 
     def start_pop_queue
       delay_pop if info['next_post'].nil?
 
-      while true
-        time_wait = info['next_post'] - Time.now.to_i
-        if time_wait > 1
-          sleep 1
-          next
-        end
-
-        regex = /^\.\/files\/(\w+)\/(\d+)\/(.+)$/
-        filename = info['targets'].collect { |t| t['directory'] }.collect { |t| Dir["./files/#{t.filesystem_sanitize}/**/*"].select { |fn| regex.match(fn) and media_ids_mutex.synchronize { !info['media_ids'].include?(fn) } } }.flatten.sample
-
-        m = regex.match(filename)
-        next if m.nil?
-
-        candidate = queue.reject { |q| q.nil? }.find { |c|
-          c[:thread].no == m[2] and
-          c[:post].no == m[3] }
-
-
-        info['force_mentions'] ||= []
-
-        json_res = post_image(filename, info['force_mentions'].uniq.reject { |x| info['notag'].include?(x) }.collect{ |x| "@#{x}" }.join(" "))
-
-        info['force_mentions'] = []
-        puts "NEW IMAGE ON #{name.cyan}: #{filename.green}"
-        queue.reject! { |el| el[:post].no == m[3] and el[:thread].no == m[2] }
-        
-        next if json_res.nil?
-
-        info['no_reacts'] += 1.00
-
-        info['based_cringe'][m[1]] ||= {}
-        info['based_cringe'][m[1]][m[2]] ||= {}
-        info['based_cringe'][m[1]][m[2]]['posts'] ||= {}
-        info['based_cringe'][m[1]][m[2]]['posts'][m[3]] ||= {}
-        info['based_cringe'][m[1]][m[2]]['posts'][m[3]]['pleroma_id'] = json_res['id']
-
-        delay_pop
+      notifications.each do |notif|
+	new_notification(notif)
       end
+
+      time_wait = info['next_post'] - Time.now.to_i
+
+      running_threads = {}
+
+      info['targets'].each do |target|
+        threads_to_run = info["based_cringe"][target['directory']].keys
+        running_threads[target['directory']] = threads_to_run
+        threads_to_run.each do |tno|
+          run_thread(target, Thread.new({'no' => tno, 'last_modified' => info['threads_touched'][target['directory']][tno]}))
+        end
+      end
+
+      if time_wait > 1
+	save_info info
+        return
+      end
+
+      build_queue
+
+      regex = /^\.\/files\/(\w+)\/(\d+)\/(.+)$/
+      filename = info['targets'].collect { |t| t['directory'] }.collect { |t| Dir["./files/#{t.filesystem_sanitize}/**/*"].select { |fn| regex.match(fn) and media_ids_mutex.synchronize { !info['media_ids'].include?(fn) } } }.flatten.sample
+
+      m = regex.match(filename)
+      if m.nil?
+        save_info info
+	return
+      end
+
+      candidate = queue.reject { |q| q.nil? }.find { |c|
+        c[:thread].no == m[2] and
+        c[:post].no == m[3] }
+
+
+      info['force_mentions'] ||= []
+
+      json_res = post_image(filename, info['force_mentions'].uniq.reject { |x| info['notag'].include?(x) }.collect{ |x| "@#{x}" }.join(" "))
+
+      info['force_mentions'] = []
+      puts "NEW IMAGE ON #{name.cyan}: #{filename.green}"
+      delay_pop
+      queue.reject! { |el| el[:post].no == m[3] and el[:thread].no == m[2] }
+      
+      if json_res.nil?
+        save_info info
+	return
+      end
+
+      info['no_reacts'] += 1.00
+
+      info['based_cringe'][m[1]] ||= {}
+      info['based_cringe'][m[1]][m[2]] ||= {}
+      info['based_cringe'][m[1]][m[2]]['posts'] ||= {}
+      info['based_cringe'][m[1]][m[2]]['posts'][m[3]] ||= {}
+      info['based_cringe'][m[1]][m[2]]['posts'][m[3]]['pleroma_id'] = json_res['id']
+
+      save_info info
     end
 
     def delay_pop
@@ -217,10 +252,8 @@ module FourPleroma
         client.update_credentials({"fields_attributes": [ { "name": "Bot Author", "value": "@NEETzsche@iddqd.social" }, {"name": "Next Post", "value": popping_time}, {"name": "Posts Since React", "value": info['no_reacts'].to_i.to_s} ]})
         puts "WILL POP #{name.cyan}'s QUEUE AT: #{popping_time.yellow} (#{queue_wait.yellow}s) (number of posts without reacts: #{info['no_reacts'].to_i.red})"
 
-        save_info info
       rescue => e
         puts "FAILED TO DELAY POP FOR ERROR TYPE #{e.class.red} WITH MESSAGE #{e.message.red}"
-        sleep 3600
       end
     end
 
@@ -430,20 +463,104 @@ module FourPleroma
       "./files/#{target['directory'].filesystem_sanitize}/#{tno}/"
     end
 
-    def start_build_queue
-      puts "4pleroma bot, watching catalogs: #{info['targets'].collect { |t| t['directory'].cyan }.join(", ")}"
-
-      info["threads_touched"] ||= {}
-
-      info['based_cringe'] ||= {}
-
-      while true
+    def build_queue
+      building_queue_mutex.synchronize do
         info['targets'].each do |target|
           run_target target
         end
-
-        sleep 60
       end
+    end
+
+    def run_thread(target, thread)
+      return if info["threads_touched"][target['directory']].keys.include?(thread.no) and info["threads_touched"][target['directory']][thread.no] >= (thread.last_modified - info['janny_lag'])
+      thread_url = target['thread_url'].gsub("%%NUMBER%%", thread.no)
+      begin
+	uri = URI.parse(thread_url)
+	result = Net::HTTP.get_response(uri)
+	code = result.code.to_i
+	if (400..499).include?(code)
+	  dump_thread(target, thread.no)
+	  return
+	elsif (200..299).include?(code)
+	  json = JSON.parse(result.body)
+          thread.posts = json["posts"].collect { |p| Post.new(p, schema) }
+	  if json["posts"].first['archived'] == 1
+	    dump_thread(target, thread.no)
+	    return
+	  end
+	else
+          puts "#{code.yellow} -- Unsure what to do with thread #{target['directory'].cyan} - #{thread.no.yellow} (#{thread_url.cyan})"
+	end
+      rescue
+        return
+      end
+
+      info['thread_ops'][target['directory']][thread.no] = thread.posts.first.body if thread.posts
+
+      thread_words = thread.words.uniq
+      thread_badwords = thread_words.select { |tw| info["badwords"].any? { |bw| bw == tw } || info["badregex"].any? { |br| %r{#{br}}i.match(tw) } }
+
+      if thread_badwords.length > 0
+        puts "Skipping #{name.cyan} - #{target['directory'].cyan} - #{thread.no.cyan} for detected bad words: #{thread_badwords.red.to_unescaped_s}"
+        info["threads_touched"][target['directory']][thread.no] = Time.now.to_i * 2
+        return
+      end
+        
+      thread.posts.select { |p| p.posted_at >= info["threads_touched"][target['directory']][thread.no].to_i and p.remote_filename.length > 0 }.each do |p|
+        begin
+          directory = get_directory(target, thread.no)
+          FileUtils.mkdir_p(directory)
+          filename = "#{directory}#{p.filename}#{p.ext}"
+
+          url = target['image_url'].gsub("%%TIM%%", p.remote_filename).gsub("%%EXT%%", p.ext)
+          img = Net::HTTP.get_response(URI(url)).body
+          f = File.open(filename, "w")
+          f.write(img)
+          f.close
+
+          queue.push({
+            :post => p,
+            :thread => thread,
+            :filename => filename
+          })
+        rescue => e
+          puts "Could not save file, yielding error of type #{e.class.red} with message #{e.message.red}"
+        end
+      end
+
+      info["threads_touched"][target['directory']][thread.no] = Time.now.to_i
+    end
+
+    def dump_thread(target, tno)
+      puts "Dumping thread #{target['directory'].cyan} - #{tno.red} due to expiration"
+
+      info['based_cringe'] ||= {}
+      info['based_cringe'][target['directory']] ||= {}
+      info['based_cringe'][target['directory']][tno] ||= {}
+      info['based_cringe'][target['directory']][tno]['posts'] ||= {}
+
+      info['carried_over_dumps'] += info['based_cringe'][target['directory']][tno]['posts'].select { |post_no, post| post['based'] || post['fav'] }.length
+
+      mentions = info['based_cringe'][target['directory']][tno]['posts'].collect { |post_no, post| post['based'] ? post['based'] : [] }.flatten
+
+      mentions.uniq!
+      info['based_cringe'][target['directory']][tno]['untagged'] ||= []
+      mentions.reject! { |mention|  info['based_cringe'][target['directory']][tno]['untagged'].include?(mention) }
+      mentions.reject! { |mention| info['notag'].include?(mention) }
+      mentions.collect! { |mention| "@#{mention}" }
+
+      return if mentions.length == 0
+      :w
+      directory = get_directory(target, tno)
+
+      files = Dir["#{directory}/**/*"]
+      info["based_cringe"][target['directory']].delete(tno)
+      return if files.length == 0
+
+
+      puts "DUMPING #{name.cyan} (#{target['directory'].cyan}) THREAD: #{tno.green} with #{files.length.yellow} posts and with the following mentions: #{mentions.cyan.to_unescaped_s}"
+
+      post_image(files, "\n#{name} (#{target['directory']}) #{tno} image dump:\n#{info['thread_ops'][target['directory']][tno]}\n\n#{mentions.join(' ')}".gsub("\n\n\n", " "))
     end
 
     def run_target(target)
@@ -452,13 +569,11 @@ module FourPleroma
 
       info['old_threads'][target['directory']] ||= []
 
-      timestamp = Time.now.to_i
-
       old_queue_posts = queue.collect { |p| p[:post].no }
 
       begin
         catalog = JSON.parse(Net::HTTP.get(URI(target['catalog_url'])))
-      rescue Net::OpenTimeout
+      rescue
         return
       end
       
@@ -471,27 +586,8 @@ module FourPleroma
 
       dtn = otn - ntn
 
-      dump_threads = dtn.select { |tno| info['based_cringe'][target['directory']][tno] and info['based_cringe'][target['directory']][tno]['posts'] and info['based_cringe'][target['directory']][tno]['posts'].any? { |pno, post| (post['based'] and post['based'].length > 0) or (post['fav'] and post['fav'].length > 0) } }.each do |tno|
-        info['carried_over_dumps'] += info['based_cringe'][target['directory']][tno]['posts'].select { |post_no, post| post['based'] || post['fav'] }.length
-
-        mentions = info['based_cringe'][target['directory']][tno]['posts'].collect { |post_no, post| post['based'] ? post['based'] : [] }.flatten
-        directory = get_directory(target, tno)
-
-        files = Dir["#{directory}/**/*"]
-        next if files.length == 0
-
-
-        info['based_cringe'][target['directory']][tno]['untagged'] ||= []
-        mentions.reject! { |mention|  info['based_cringe'][target['directory']][tno]['untagged'].include?(mention) }
-        mentions.reject! { |mention| info['notag'].include?(mention) }
-        mentions.collect! { |mention| "@#{mention}" }
-
-        mentions.uniq!
-
-        puts "DUMPING #{name.cyan} (#{target['directory'].cyan}) THREAD: #{tno.green} with #{files.length.yellow} posts and with the following mentions: #{mentions.cyan.to_unescaped_s}"
-        next if mentions.length == 0
-
-        post_image(files, "\n#{name} (#{target['directory']}) #{tno} image dump:\n#{info['thread_ops'][target['directory']][tno]}\n\n#{mentions.join(' ')}".gsub("\n\n\n", " "))
+      dtn.each do |tno|
+        #dump_thread(target, tno)
       end
 
       Dir["./files/#{target['directory'].filesystem_sanitize}/*"].each do |fn|
@@ -522,51 +618,13 @@ module FourPleroma
       rate_limit_exponent = 0
 
       catalog.threads.each do |thread|
-        next if info["threads_touched"][target['directory']].keys.include?(thread.no) and info["threads_touched"][target['directory']][thread.no] >= (thread.last_modified - info['janny_lag'])
-        thread_url = target['thread_url'].gsub("%%NUMBER%%", thread.no)
-        begin
-          thread.posts = JSON.parse(Net::HTTP.get(URI(thread_url)))["posts"].collect { |p| Post.new(p, schema) }
-	rescue
-          next
-        end
-
-        info['thread_ops'][target['directory']][thread.no] = thread.posts.first.body if thread.posts
-
-        thread_words = thread.words.uniq
-        thread_badwords = thread_words.select { |tw| info["badwords"].any? { |bw| bw == tw } || info["badregex"].any? { |br| %r{#{br}}i.match(tw) } }
-
-        if thread_badwords.length > 0
-          puts "Skipping #{name.cyan} - #{target['directory'].cyan} - #{thread.no.cyan} for detected bad words: #{thread_badwords.red.to_unescaped_s}"
-          info["threads_touched"][target['directory']][thread.no] = Time.now.to_i * 2
-          next
-        end
-        
-        thread.posts.select { |p| p.posted_at >= info["threads_touched"][target['directory']][thread.no].to_i and p.remote_filename.length > 0 }.each do |p|
-          begin
-            directory = get_directory(target, thread.no)
-            FileUtils.mkdir_p(directory)
-            filename = "#{directory}#{p.filename}#{p.ext}"
-
-            url = target['image_url'].gsub("%%TIM%%", p.remote_filename).gsub("%%EXT%%", p.ext)
-            img = Net::HTTP.get_response(URI(url)).body
-            f = File.open(filename, "w")
-            f.write(img)
-            f.close
-
-            queue.push({
-              :post => p,
-              :thread => thread,
-              :filename => filename
-            })
-          rescue => e
-            puts "Could not save file, yielding error of type #{e.class.red} with message #{e.message.red}"
-          end
-        end
-
-        info["threads_touched"][target['directory']][thread.no] = timestamp.to_i
+	run_thread(target, thread)
       end
 
       new_queue_posts = queue.collect { |p| p[:post].no }
+
+      info['based_cringe'][target['directory']].reject! {|k,v| dtn.include?(k) }
+      info['threads_touched'][target['directory']].reject! {|k,v| dtn.include?(k) }
 
       new_info = info
 
@@ -580,8 +638,9 @@ module FourPleroma
         puts "REMOVED #{(queue_start - queue_end).red} OLD IMAGES TO #{name.cyan} (#{target['directory'].cyan}), BRINGING THE TOTAL TO #{queue_end.red}"
       end
 
-      media_ids_mutex.synchronize { info['media_ids'].select! { |fn, id| Dir["./files/**/*"].include?(fn) } }
+      queue_now = Dir["./files/**/*"]
 
+      media_ids_mutex.synchronize { info['media_ids'].select! { |fn, id| queue_now.include?(fn) } }
     end
 
     def save_info(new_info)
@@ -621,7 +680,7 @@ module FourPleroma
           info['media_ids'].merge!(new_media_ideas)
           save_info info
         end
-      rescue JSON::ParserError
+      rescue
         return
       end
       
@@ -679,9 +738,6 @@ config_files.each do |cf|
   infos[cf]["badwords"] = badwords unless infos[cf]["isolated_badwords"] == true
   infos[cf]["badregex"] = badregex unless infos[cf]["isolated_badregex"] == true
   four_pleroma = FourPleroma::Main.new(cf, infos[cf])
-  threads["#{cf} build_queue"] = Thread.new do
-    four_pleroma.start_build_queue
-  end
   threads["#{cf} pop_queue"] = Thread.new do
     four_pleroma.start_pop_queue
   end
