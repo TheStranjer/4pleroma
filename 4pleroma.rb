@@ -173,6 +173,11 @@ module FourPleroma
 	notif_ids = notifs.collect { |notif| notif['id'].to_i }
 	info['last_notification_id'] = notif_ids.max.to_i > info['last_notification_id'].to_i ? notif_ids.max.to_i : info['last_notification_id']
 
+	if notifs.length > 0
+	  info['no_reacts'] = 0
+	  delay_pop
+	end
+
 	notifs
       rescue
         []
@@ -190,20 +195,12 @@ module FourPleroma
 
       running_threads = {}
 
-      info['targets'].each do |target|
-        threads_to_run = info["based_cringe"][target['directory']].keys
-        running_threads[target['directory']] = threads_to_run
-        threads_to_run.each do |tno|
-          run_thread(target, Thread.new({'no' => tno, 'last_modified' => info['threads_touched'][target['directory']][tno]}))
-        end
-      end
+      build_queue
 
       if time_wait > 1
 	save_info info
         return
       end
-
-      build_queue
 
       regex = /^\.\/files\/(\w+)\/(\d+)\/(.+)$/
       filename = info['targets'].collect { |t| t['directory'] }.collect { |t| Dir["./files/#{t.filesystem_sanitize}/**/*"].select { |fn| regex.match(fn) and media_ids_mutex.synchronize { !info['media_ids'].include?(fn) } } }.flatten.sample
@@ -246,8 +243,12 @@ module FourPleroma
 
     def delay_pop
       begin
+        return unless @already_popped.nil?
+	@already_popped = true
+
         queue_wait = calc_wait
-        info['next_post'] = Time.now.to_i + queue_wait
+	candidate_time = Time.now.to_i + queue_wait
+        info['next_post'] = candidate_time
         popping_time = Time.at(info['next_post']).strftime(time_format)
         client.update_credentials({"fields_attributes": [ { "name": "Bot Author", "value": "@NEETzsche@iddqd.social" }, {"name": "Next Post", "value": popping_time}, {"name": "Posts Since React", "value": info['no_reacts'].to_i.to_s} ]})
         puts "WILL POP #{name.cyan}'s QUEUE AT: #{popping_time.yellow} (#{queue_wait.yellow}s) (number of posts without reacts: #{info['no_reacts'].to_i.red})"
@@ -305,8 +306,6 @@ module FourPleroma
     end
 
     def new_favourite(notif)
-      info['no_reacts'] = 0
-
       status_id = notif['status']['id']
       tno = nil
       pno = nil
@@ -444,8 +443,6 @@ module FourPleroma
     def new_notification(notif)
       return if notif['id'].nil?
 
-      info['no_reacts'] = 0
-
       info['last_notification_id'] = notif['id'].to_i if notif['id'].to_i > info['last_notification_id'].to_i
 
       acct = notif['account']['acct'] || notif['account']['fqn']
@@ -455,8 +452,6 @@ module FourPleroma
       meth = "new_#{notif['type'].split(':').last}".to_sym
 
       send(meth, notif) if self.respond_to?(meth)
-
-      delay_pop
     end
 
     def get_directory(target, tno)
@@ -474,25 +469,11 @@ module FourPleroma
     def run_thread(target, thread)
       return if info["threads_touched"][target['directory']].keys.include?(thread.no) and info["threads_touched"][target['directory']][thread.no] >= (thread.last_modified - info['janny_lag'])
       thread_url = target['thread_url'].gsub("%%NUMBER%%", thread.no)
+
       begin
-	uri = URI.parse(thread_url)
-	result = Net::HTTP.get_response(uri)
-	code = result.code.to_i
-	if (400..499).include?(code)
-	  dump_thread(target, thread.no)
-	  return
-	elsif (200..299).include?(code)
-	  json = JSON.parse(result.body)
-          thread.posts = json["posts"].collect { |p| Post.new(p, schema) }
-	  if json["posts"].first['archived'] == 1
-	    dump_thread(target, thread.no)
-	    return
-	  end
-	else
-          puts "#{code.yellow} -- Unsure what to do with thread #{target['directory'].cyan} - #{thread.no.yellow} (#{thread_url.cyan})"
-	end
+	thread.posts = JSON.parse(Net::HTTP.get_response(URI(thread_url)).body)['posts'].collect { |p| Post.new(p, schema) }
       rescue
-        return
+        thread.posts = []
       end
 
       info['thread_ops'][target['directory']][thread.no] = thread.posts.first.body if thread.posts
@@ -532,8 +513,6 @@ module FourPleroma
     end
 
     def dump_thread(target, tno)
-      puts "Dumping thread #{target['directory'].cyan} - #{tno.red} due to expiration"
-
       info['based_cringe'] ||= {}
       info['based_cringe'][target['directory']] ||= {}
       info['based_cringe'][target['directory']][tno] ||= {}
@@ -581,7 +560,7 @@ module FourPleroma
 
       catalog = Catalog.new(catalog, schema)
 
-      otn = info['old_threads'][target['directory']].collect { |thr| thr['no'] }
+      otn = info["based_cringe"][target['directory']].keys
       ntn = catalog.threads.collect { |thr| thr.no }
 
       dtn = otn - ntn
