@@ -166,7 +166,7 @@ module FourPleroma
     end
 
     def notifications
-      #begin
+      begin
 	args = { "with_muted" => true, "limit" => 20 }
 	args.merge!({'since_id' => info['last_notification_id']}) if info['last_notification_id']
         notifs = client.notifications(args)
@@ -174,9 +174,9 @@ module FourPleroma
 	info['last_notification_id'] = notif_ids.max.to_i > info['last_notification_id'].to_i ? notif_ids.max.to_i : info['last_notification_id']
 
 	notifs
-      #rescue
-      #  []
-      #end
+      rescue
+        []
+      end
     end
 
     def start_pop_queue
@@ -550,7 +550,7 @@ module FourPleroma
       mentions.collect! { |mention| "@#{mention}" }
 
       return if mentions.length == 0
-      :w
+
       directory = get_directory(target, tno)
 
       files = Dir["#{directory}/**/*"]
@@ -587,7 +587,7 @@ module FourPleroma
       dtn = otn - ntn
 
       dtn.each do |tno|
-        #dump_thread(target, tno)
+        dump_thread(target, tno)
       end
 
       Dir["./files/#{target['directory'].filesystem_sanitize}/*"].each do |fn|
