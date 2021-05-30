@@ -451,7 +451,9 @@ module FourPleroma
 
       acct = notif['account']['acct'] || notif['account']['fqn']
 
-      log "New #{notif['type'].cyan} from #{acct.cyan} on #{name.cyan}"
+      msg = "New #{notif['type'].cyan} from #{acct.cyan} on #{name.cyan}"
+      msg += ": #{notif['status']['url'].green}" if notif['status'] and notif['status']['url']
+      log msg
 
       meth = "new_#{notif['type'].split(':').last}".to_sym
 
