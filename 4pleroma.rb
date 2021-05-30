@@ -699,6 +699,38 @@ module FourPleroma
   end
 end
 
+def read_file(fn)
+  return unless File.exist?(fn)
+  f = File.open(fn, "r")
+  r = f.read
+  f.close
+  r
+end
+
+def write_file(fn, content)
+  f = File.open(fn, "w")
+  r = f.write(content)
+  f.close
+  r
+end
+
+def process_exists?(pid)
+  Process.getpgid pid
+  true
+rescue Errno::ESRCH
+  false
+end
+
+pid_fn = "4pleroma.pid"
+
+pid = read_file(pid_fn).to_i
+if process_exists?(pid)
+  puts "--- RUN SKIPPED (run in media res) ---------------------------------------------".red
+  abort
+end
+
+write_file(pid_fn, Process.pid.to_s)
+
 config_files = ARGV.select { |x| /\.json$/i.match(x) }
 
 infos = {}
@@ -727,4 +759,3 @@ config_files.each do |cf|
 end
 
 threads.each { |cf,thr| thr.join }
-
