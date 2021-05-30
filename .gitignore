@@ -7,3 +7,4 @@ temp
 nohup.out
 *.sh
 files/
+4pleroma.pid
