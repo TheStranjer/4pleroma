@@ -166,7 +166,7 @@ module FourPleroma
     end
 
     def log(msg)
-      puts "[#{Time.now.to_s.light_blue}] #{msg}"
+      puts "[#{Time.now.to_s.light_blue}, #{name.cyan}] #{msg}"
     end
 
     def notifications
@@ -225,7 +225,7 @@ module FourPleroma
       json_res = post_image(filename, info['force_mentions'].uniq.reject { |x| info['notag'].include?(x) }.collect{ |x| "@#{x}" }.join(" "))
 
       info['force_mentions'] = []
-      log "NEW IMAGE ON #{name.cyan}: #{filename.green}"
+      log "NEW IMAGE: #{filename.green}"
       delay_pop
       queue.reject! { |el| el[:post].no == m[3] and el[:thread].no == m[2] }
       
@@ -255,7 +255,7 @@ module FourPleroma
         info['next_post'] = candidate_time
         popping_time = Time.at(info['next_post']).strftime(time_format)
         client.update_credentials({"fields_attributes": [ { "name": "Bot Author", "value": "@NEETzsche@iddqd.social" }, {"name": "Next Post", "value": popping_time}, {"name": "Posts Since React", "value": info['no_reacts'].to_i.to_s} ]})
-        log "WILL POP #{name.cyan}'s QUEUE AT: #{popping_time.yellow} (#{queue_wait.yellow}s) (number of posts without reacts: #{info['no_reacts'].to_i.red})"
+        log "WILL POP QUEUE AT: #{popping_time.yellow} (#{queue_wait.yellow}s) (number of posts without reacts: #{info['no_reacts'].to_i.red})"
 
       rescue => e
         log "FAILED TO DELAY POP FOR ERROR TYPE #{e.class.red} WITH MESSAGE #{e.message.red}"
@@ -451,7 +451,7 @@ module FourPleroma
 
       acct = notif['account']['acct'] || notif['account']['fqn']
 
-      msg = "New #{notif['type'].cyan} from #{acct.cyan} on #{name.cyan}"
+      msg = "New #{notif['type'].cyan} from #{acct.cyan}"
       msg += ": #{notif['status']['url'].green}" if notif['status'] and notif['status']['url']
       log msg
 
@@ -488,7 +488,7 @@ module FourPleroma
       thread_badwords = thread_words.select { |tw| info["badwords"].any? { |bw| bw == tw } || info["badregex"].any? { |br| %r{#{br}}i.match(tw) } }
 
       if thread_badwords.length > 0
-        log "Skipping #{name.cyan} - #{target['directory'].cyan} - #{thread.no.cyan} for detected bad words: #{thread_badwords.red.to_unescaped_s}"
+        log "Skipping #{target['directory'].cyan} - #{thread.no.cyan} for detected bad words: #{thread_badwords.red.to_unescaped_s}"
         info["threads_touched"][target['directory']][thread.no] = Time.now.to_i * 2
         return
       end
@@ -543,7 +543,7 @@ module FourPleroma
       return if files.length == 0
 
 
-      log "DUMPING #{name.cyan} (#{target['directory'].cyan}) THREAD: #{tno.green} with #{files.length.yellow} posts and with the following mentions: #{mentions.cyan.to_unescaped_s}"
+      log "DUMPING (#{target['directory'].cyan}) THREAD: #{tno.green} with #{files.length.yellow} posts and with the following mentions: #{mentions.cyan.to_unescaped_s}"
 
       post_image(files, "\n#{name} (#{target['directory']}) #{tno} image dump:\n#{info['thread_ops'][target['directory']][tno]}\n\n#{mentions.join(' ')}".gsub("\n\n\n", " "))
     end
@@ -590,7 +590,7 @@ module FourPleroma
       info['thread_ops'][target['directory']] ||= {}
       info['thread_ops'][target['directory']].reject! { |k| dtn.include?(k) }
 
-      log "Removed the following threads from #{name.cyan} (#{target['directory'].cyan}) due to expiration: #{dtn.red.to_unescaped_s}" if dtn.size > 0
+      log "Removed the following threads (#{target['directory'].cyan}) due to expiration: #{dtn.red.to_unescaped_s}" if dtn.size > 0
 
       info['threads_touched'][target['directory']] ||= {}
       info['based_cringe'][target['directory']] ||= {}
