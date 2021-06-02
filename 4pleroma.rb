@@ -3,6 +3,7 @@ require 'net/http'
 require 'pry'
 require 'colorize'
 require 'syndesmos'
+require 'timeout'
 
 class String
   def words
@@ -147,7 +148,13 @@ module FourPleroma
 
       @client = Syndesmos.new(bearer_token: bearer_token, instance: instance)
 
-      @user = client.verify_credentials
+      Timeout.timeout(30) do
+        @user = client.verify_credentials
+      rescue => e
+	log "Could not get credentials because #{e.class.red} had message #{e.message.red}"
+	return
+      end
+
 
       raise "Invalid credentials for #{name}" unless client.valid_credentials?
 
