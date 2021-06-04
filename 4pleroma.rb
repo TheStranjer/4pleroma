@@ -282,7 +282,7 @@ module FourPleroma
       ret *= info['no_reacts'].to_f
       ret *= (Time.now.to_f - opt) / info['queue_wait'] if opt > 0
 
-      info['carried_over_dumps'] -= 1 if info['carried_over_dumps'] > 0
+      info['carried_over_dumps'] **= 0.5 if info['carried_over_dumps'] > 0 and ret > 0
 
       ret
     end
