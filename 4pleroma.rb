@@ -438,6 +438,9 @@ module FourPleroma
       info['force_mentions'] ||= []
       info['force_mentions'].push(acct)
 
+      @force_mentions_ids ||= []
+      @force_mentions_ids.push(notif['status']['id'])
+
       notif['status']['mentions'].each do |mention|
         info['force_mentions'].push(mention['acct']) unless mention['acct'] == @user['acct'] or mention['acct'] == @user['fqn']
       end
@@ -680,15 +683,18 @@ module FourPleroma
         'Content-Type' => 'application/json'
       }
 
+      id = (@force_mentions_ids || []).sample
+
       begin
         client.statuses({
-          'status'       => "#{info['content_prepend']}#{process_html(message)}#{info['content_append']}".strip,
-          'source'       => '4pleroma',
-          'visibility'   => visibility_listing,
-          'sensitive'    => sensitive,
-          'content_type' => 'text/html',
-          'media_ids'    => media_ids
-        })
+          'status'         => "#{info['content_prepend']}#{process_html(message)}#{info['content_append']}".strip,
+          'source'         => '4pleroma',
+          'visibility'     => visibility_listing,
+          'sensitive'      => sensitive,
+          'content_type'   => 'text/html',
+          'media_ids'      => media_ids,
+	  'in_reply_to_id' => id
+	}.reject {|k,v| v.nil? })
       rescue => e
         nil
       end
