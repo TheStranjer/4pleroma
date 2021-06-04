@@ -454,6 +454,14 @@ module FourPleroma
       new_favourite(notif)
     end
 
+    def notif_url_to_post(notif)
+      if notif['type'] == 'mention'
+	"https://#{instance}/statuses/#{notif['status']['in_reply_to_id']}"
+      else
+	notif['status']['url'] if notif['status'] and notif['status']['url']
+      end
+    end
+
     def new_notification(notif)
       return if notif['id'].nil?
 
@@ -462,7 +470,8 @@ module FourPleroma
       acct = notif['account']['acct'] || notif['account']['fqn']
 
       msg = "New #{notif['type'].cyan} from #{acct.cyan}"
-      msg += ": #{notif['status']['url'].green}" if notif['status'] and notif['status']['url']
+      url = notif_url_to_post(notif)
+      msg += ": #{url.green}" if url
       log msg
 
       meth = "new_#{notif['type'].split(':').last}".to_sym
