@@ -229,7 +229,10 @@ module FourPleroma
 
       info['force_mentions'] ||= []
 
-      json_res = post_image(filename, info['force_mentions'].uniq.reject { |x| info['notag'].include?(x) }.collect{ |x| "@#{x}" }.join(" "))
+      msg = "<b><a href=\"https://boards.4channel.org#{m[1].gsub('_', '/')}thread/#{m[2]}\">Post From #{m[2]}</a></b>\n\n"
+      msg += "#{info['force_mentions'].uniq.reject { |x| info['notag'].include?(x) }.collect{ |x| "@#{x}" }.join(" ")}".strip
+
+      json_res = post_image(filename, msg)
 
       info['force_mentions'] = []
       log "NEW IMAGE: #{filename.green}"
@@ -310,7 +313,8 @@ module FourPleroma
       client.statuses({
         "status"         => "@#{acct} You won't be tagged by this bot in the future",
         "visibility"     => "direct",
-        "in_reply_to_id" => notif['status']['id']
+        "in_reply_to_id" => notif['status']['id'],
+	"content_type"   => "text/markdown"
       })
 
       save_info(info)
@@ -495,11 +499,14 @@ module FourPleroma
       return if info["threads_touched"][target['directory']].keys.include?(thread.no) and info["threads_touched"][target['directory']][thread.no] >= (thread.last_modified - info['janny_lag'])
       thread_url = target['thread_url'].gsub("%%NUMBER%%", thread.no)
 
-      begin
+      #begin
 	thread.posts = JSON.parse(Net::HTTP.get_response(URI(thread_url)).body)['posts'].collect { |p| Post.new(p, schema) }
-      rescue
-        thread.posts = []
-      end
+	@threads ||= {}
+	@threads[target['directory']] ||= {}
+	@threads[target['directory']][thread.no] = thread.posts
+      #rescue
+      #  thread.posts = []
+      #end
 
       info['thread_ops'][target['directory']][thread.no] = thread.posts.first.body if thread.posts
 
