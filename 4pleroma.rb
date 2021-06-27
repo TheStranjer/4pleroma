@@ -81,7 +81,7 @@ module FourPleroma
   end
 
   class Post
-    attr_accessor :schema, :no, :remote_filename, :name, :body, :ext, :posted_at, :filename
+    attr_accessor :schema, :no, :remote_filename, :name, :body, :ext, :posted_at, :filename, :closed
 
     def initialize(contents, schema='4chan')
       @schema = schema
@@ -115,6 +115,7 @@ module FourPleroma
       @ext = contents['ext'].to_s
       @posted_at = contents['time'].to_i
       @filename = contents['filename'].to_s
+      @closed = contents['closed'].to_i
     end
   end
 
@@ -148,8 +149,8 @@ module FourPleroma
 
       @client = Syndesmos.new(bearer_token: bearer_token, instance: instance)
 
-      Timeout.timeout(30) do
-        @user = client.verify_credentials
+      begin
+        Timeout.timeout(30) { @user = client.verify_credentials }
       rescue => e
 	log "Could not get credentials because #{e.class.red} had message #{e.message.red}"
 	return
@@ -492,7 +493,14 @@ module FourPleroma
         info['targets'].each do |target|
           run_target target
         end
+
+	directories = info['targets'].collect { |t| t['directory'] }
+	['thread_ops', 'threads_touched', 'based_cringe'].each do |el|
+	  info[el].select! { |k,v| directories.include?(k) }
+	end
       end
+
+
     end
 
     def run_thread(target, thread)
@@ -507,6 +515,11 @@ module FourPleroma
       #rescue
       #  thread.posts = []
       #end
+
+      if thread.posts.any? {|post| post.closed == 1 }
+        dump_thread(target, thread.no)
+        return
+      end
 
       info['thread_ops'][target['directory']][thread.no] = thread.posts.first.body if thread.posts
 
@@ -651,9 +664,12 @@ module FourPleroma
     end
 
     def save_info(new_info)
+      json = JSON.pretty_generate(new_info)
       f = File.open(filename, "w")
-      f.write(JSON.pretty_generate(new_info))
+      f.write(json)
       f.close
+    rescue => e
+      log "Could not save #{name.cyan} because of error type #{e.class.red} with message #{e.message.red}"
     end
 
     def notify_opt_out(user, message="You reblogged, favorited, or emoji reacted a post I made. That post came from a thread on #{name}. When the thread dies, all of the images collected from it will be uploaded in a big dump post. You will, by default, be tagged in that dump. If you don't want to ever be tagged in posts by me respond with 'notag' instead.")
@@ -753,7 +769,7 @@ end
 pid_fn = "4pleroma.pid"
 
 pid = read_file(pid_fn).to_i
-if process_exists?(pid)
+if pid > 0 and process_exists?(pid)
   puts "--- RUN SKIPPED (run in media res) ---------------------------------------------".red
   abort
 end
@@ -768,9 +784,11 @@ badregex = []
 threads = {}
 
 config_files.each do |cf|
-    infos[cf] = JSON.parse(File.open(cf, "r").read)
-    badwords += infos[cf]["badwords"] if infos[cf]["badwords"].class == Array
-    badregex += infos[cf]["badregex"] if infos[cf]["badregex"].class == Array
+  infos[cf] = JSON.parse(File.open(cf, "r").read)
+  badwords += infos[cf]["badwords"] if infos[cf]["badwords"].class == Array
+  badregex += infos[cf]["badregex"] if infos[cf]["badregex"].class == Array
+rescue => e
+  puts "Failed to load file #{cf.red}"
 end
 
 badwords.uniq!
