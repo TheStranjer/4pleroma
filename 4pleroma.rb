@@ -665,6 +665,7 @@ module FourPleroma
 
     def save_info(new_info)
       json = JSON.pretty_generate(new_info)
+      return if json.strip.length == 0
       f = File.open(filename, "w")
       f.write(json)
       f.close
