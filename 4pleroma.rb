@@ -246,6 +246,7 @@ module FourPleroma
       end
 
       info['no_reacts'] += 1.00
+      delay_pop
 
       info['based_cringe'][m[1]] ||= {}
       info['based_cringe'][m[1]][m[2]] ||= {}
@@ -258,15 +259,12 @@ module FourPleroma
 
     def delay_pop
       begin
-        return unless @already_popped.nil?
-	@already_popped = true
-
         queue_wait = calc_wait
 	candidate_time = Time.now.to_i + queue_wait
         info['next_post'] = candidate_time
         popping_time = Time.at(info['next_post']).strftime(time_format)
         client.update_credentials({"fields_attributes": [ { "name": "Bot Author", "value": "@NEETzsche@iddqd.social" }, {"name": "Next Post", "value": popping_time}, {"name": "Posts Since React", "value": info['no_reacts'].to_i.to_s} ]})
-        log "WILL POP QUEUE AT: #{popping_time.yellow} (#{queue_wait.yellow}s) (number of posts without reacts: #{info['no_reacts'].to_i.red})"
+        log "WILL POP QUEUE AT: #{popping_time.yellow} (#{queue_wait.yellow}s) (number of posts without reacts: #{info['no_reacts'].to_i.red})" if queue_wait > 0
 
       rescue => e
         log "FAILED TO DELAY POP FOR ERROR TYPE #{e.class.red} WITH MESSAGE #{e.message.red}"
